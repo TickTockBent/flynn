@@ -7,7 +7,7 @@
     "dev": "vercel dev"
   },
   "devDependencies": {
-    "@vercel/node": "^3.0.0",
+    "@vercel/node": "^5.6.9",
     "typescript": "^5.3.0"
   }
 }
