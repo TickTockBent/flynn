@@ -80,11 +80,30 @@ export function generateSnake(contrib: ContributionGrid): string {
   if (food) foodEvents.push({ x: food.x, y: food.y, appear: 0, eaten: -1 });
 
   const maxSteps = 200;
-  let actualSteps = maxSteps;
 
   for (let s = 1; s <= maxSteps; s++) {
     const head = snakeBody[0];
-    if (!food) { actualSteps = s; break; }
+    if (!food) {
+      // No food left — restart the snake
+      for (const seg of snakeBody) markExit(seg.x, seg.y, s);
+      snakeBody.length = 0;
+      occupied.clear();
+      const restartX = Math.floor(cols / 6);
+      const restartY = Math.floor(rows / 2);
+      snakeBody.push(
+        { x: restartX, y: restartY },
+        { x: restartX - 1, y: restartY },
+        { x: restartX - 2, y: restartY },
+      );
+      direction = 0;
+      for (const seg of snakeBody) {
+        occupied.add(key(seg.x, seg.y));
+        markEnter(seg.x, seg.y, s);
+      }
+      food = placeFood();
+      if (food) foodEvents.push({ x: food.x, y: food.y, appear: s, eaten: -1 });
+      continue;
+    }
 
     // AI: move toward food, avoid walls and self
     const opposite = (direction + 2) % 4;
@@ -120,7 +139,35 @@ export function generateSnake(contrib: ContributionGrid): string {
       if (score > bestScore) { bestScore = score; bestDir = d; }
     }
 
-    if (bestDir === -1) { actualSteps = s; break; } // Stuck
+    if (bestDir === -1) {
+      // Snake is stuck — close occupancy intervals and restart immediately
+      for (const seg of snakeBody) markExit(seg.x, seg.y, s);
+      if (foodEvents.length > 0 && foodEvents[foodEvents.length - 1].eaten === -1) {
+        foodEvents[foodEvents.length - 1].eaten = s;
+      }
+
+      // Reset snake to starting position
+      snakeBody.length = 0;
+      occupied.clear();
+      const restartX = Math.floor(cols / 6);
+      const restartY = Math.floor(rows / 2);
+      snakeBody.push(
+        { x: restartX, y: restartY },
+        { x: restartX - 1, y: restartY },
+        { x: restartX - 2, y: restartY },
+      );
+      direction = 0;
+      for (const seg of snakeBody) {
+        occupied.add(key(seg.x, seg.y));
+        markEnter(seg.x, seg.y, s);
+      }
+
+      // Place fresh food
+      food = placeFood();
+      if (food) foodEvents.push({ x: food.x, y: food.y, appear: s, eaten: -1 });
+      continue;
+    }
+
     direction = bestDir;
 
     const newHead = { x: head.x + dx[direction], y: head.y + dy[direction] };
@@ -144,7 +191,7 @@ export function generateSnake(contrib: ContributionGrid): string {
   // Close any open occupancy intervals
   for (const [, intervals] of cellOccupancy) {
     for (const interval of intervals) {
-      if (interval[1] === -1) interval[1] = actualSteps;
+      if (interval[1] === -1) interval[1] = maxSteps;
     }
   }
 
@@ -182,12 +229,11 @@ export function generateSnake(contrib: ContributionGrid): string {
 
     // Build visibility keyframes
     const stops: string[] = [];
-    let lastOpacity = '0';
     const events: { pct: number; opacity: string }[] = [{ pct: 0, opacity: '0' }];
 
     for (const [enter, exit] of intervals) {
-      const enterPct = (enter / actualSteps) * 100;
-      const exitPct = (exit / actualSteps) * 100;
+      const enterPct = (enter / maxSteps) * 100;
+      const exitPct = (exit / maxSteps) * 100;
       events.push({ pct: enterPct, opacity: '0.8' });
       events.push({ pct: exitPct, opacity: '0.2' });
     }
@@ -201,7 +247,7 @@ export function generateSnake(contrib: ContributionGrid): string {
     }
 
     trailElements += `<rect class="s${idx}" x="${px.toFixed(1)}" y="${py.toFixed(1)}" width="${cellSize}" height="${cellSize}" rx="2" fill="${colors.green}" opacity="0"/>`;
-    trailStyles += `.s${idx}{animation:s${idx} ${duration}s step-end forwards}`;
+    trailStyles += `.s${idx}{animation:s${idx} ${duration}s step-end infinite}`;
     trailStyles += `@keyframes s${idx}{${stops.join('')}}`;
     idx++;
   }
@@ -212,11 +258,11 @@ export function generateSnake(contrib: ContributionGrid): string {
     const fe = foodEvents[i];
     const px = offsetX + fe.x * step + cellSize / 2;
     const py = offsetY + fe.y * step + cellSize / 2;
-    const appearPct = ((fe.appear / actualSteps) * 100).toFixed(2);
-    const eatPct = fe.eaten >= 0 ? ((fe.eaten / actualSteps) * 100).toFixed(2) : '100';
+    const appearPct = ((fe.appear / maxSteps) * 100).toFixed(2);
+    const eatPct = fe.eaten >= 0 ? ((fe.eaten / maxSteps) * 100).toFixed(2) : '100';
 
     foodElements += `<circle class="f${i}" cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${cellSize / 2 - 1}" fill="${colors.red}" opacity="0"/>`;
-    trailStyles += `.f${i}{animation:f${i} ${duration}s step-end forwards}`;
+    trailStyles += `.f${i}{animation:f${i} ${duration}s step-end infinite}`;
     trailStyles += `@keyframes f${i}{0%,${appearPct}%{opacity:0}${appearPct}%,${eatPct}%{opacity:0.9}${eatPct}%,100%{opacity:0}}`;
   }
 
