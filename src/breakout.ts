@@ -45,6 +45,9 @@ export function generateBreakout(contrib: ContributionGrid): string {
   let vx = rand(2.5, 3.5) * (Math.random() > 0.5 ? 1 : -1);
   let vy = -4.5;
 
+  let pierceCooldown = 0; // frames remaining in pierce-through mode
+  const recentPositions: { x: number; y: number }[] = [];
+
   const ballSamples: string[] = [];
   const paddleSamples: string[] = [];
 
@@ -57,11 +60,10 @@ export function generateBreakout(contrib: ContributionGrid): string {
     bx += vx;
     by += vy;
 
-    // Wall bounces — track if any occurred to avoid corner trapping
-    let wallBounced = false;
-    if (bx <= margin + ballR) { bx = margin + ballR; vx = Math.abs(vx); wallBounced = true; }
-    if (bx >= WIDTH - margin - ballR) { bx = WIDTH - margin - ballR; vx = -Math.abs(vx); wallBounced = true; }
-    if (by <= areaTop + ballR) { by = areaTop + ballR; vy = Math.abs(vy); wallBounced = true; }
+    // Wall bounces
+    if (bx <= margin + ballR) { bx = margin + ballR; vx = Math.abs(vx); }
+    if (bx >= WIDTH - margin - ballR) { bx = WIDTH - margin - ballR; vx = -Math.abs(vx); }
+    if (by <= areaTop + ballR) { by = areaTop + ballR; vy = Math.abs(vy); }
 
     // Paddle bounce — generous hitbox
     if (by + ballR >= paddleY && by + ballR <= paddleY + paddleH + 8 &&
@@ -71,8 +73,10 @@ export function generateBreakout(contrib: ContributionGrid): string {
       vx += ((bx - paddleX - paddleW / 2) / paddleW) * 2.5;
     }
 
-    // Brick collisions — skip on wall-bounce frames to prevent corner oscillation
-    if (!wallBounced) {
+    // Brick collisions — pierce mode prevents oscillation in dense areas
+    if (pierceCooldown > 0) pierceCooldown--;
+    if (pierceCooldown === 0) {
+      // Normal hit: bounce off first brick, then enter pierce mode
       for (const brick of bricks) {
         if (!brick.alive) continue;
         if (bx + ballR >= brick.x && bx - ballR <= brick.x + brick.w &&
@@ -82,7 +86,18 @@ export function generateBreakout(contrib: ContributionGrid): string {
           const overlapX = Math.min((bx + ballR) - brick.x, (brick.x + brick.w) - (bx - ballR));
           const overlapY = Math.min((by + ballR) - brick.y, (brick.y + brick.h) - (by - ballR));
           if (overlapX < overlapY) { vx = -vx; } else { vy = -vy; }
+          pierceCooldown = 3;
           break;
+        }
+      }
+    } else {
+      // Pierce mode: destroy bricks in path without changing direction
+      for (const brick of bricks) {
+        if (!brick.alive) continue;
+        if (bx + ballR >= brick.x && bx - ballR <= brick.x + brick.w &&
+            by + ballR >= brick.y && by - ballR <= brick.y + brick.h) {
+          brick.alive = false;
+          brick.destroyTime = (f / totalFrames) * duration;
         }
       }
     }
@@ -93,12 +108,26 @@ export function generateBreakout(contrib: ContributionGrid): string {
       by = paddleY - 15;
       vx = rand(2.5, 3.5) * (Math.random() > 0.5 ? 1 : -1);
       vy = -4.5;
+      pierceCooldown = 0;
     }
 
     // Speed clamp
     const spd = Math.sqrt(vx * vx + vy * vy);
     if (spd > 7) { vx *= 7 / spd; vy *= 7 / spd; }
     if (spd < 3.5) { vx *= 3.5 / spd; vy *= 3.5 / spd; }
+
+    // Anti-stuck watchdog: if ball barely moved over 8 frames, nudge it
+    recentPositions.push({ x: bx, y: by });
+    if (recentPositions.length > 8) recentPositions.shift();
+    if (recentPositions.length === 8) {
+      const rangeX = Math.max(...recentPositions.map(p => p.x)) - Math.min(...recentPositions.map(p => p.x));
+      const rangeY = Math.max(...recentPositions.map(p => p.y)) - Math.min(...recentPositions.map(p => p.y));
+      if (rangeX < 10 && rangeY < 10) {
+        vx = rand(3, 4) * (vx >= 0 ? 1 : -1);
+        vy = rand(3, 4) * (vy >= 0 ? 1 : -1);
+        pierceCooldown = 3;
+      }
+    }
 
     if (f % sampleEvery === 0 || f === totalFrames) {
       const pct = ((f / totalFrames) * 100).toFixed(2);
