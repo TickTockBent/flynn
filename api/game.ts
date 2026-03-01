@@ -4,12 +4,14 @@ import { generatePong } from '../src/pong';
 import { generateBreakout } from '../src/breakout';
 import { generateSnake } from '../src/snake';
 import { generateLife } from '../src/life';
+import { generateTron } from '../src/tron';
 
 const games: Record<string, (c: ContributionGrid) => string> = {
   pong: generatePong,
   breakout: generateBreakout,
   snake: generateSnake,
   life: generateLife,
+  tron: generateTron,
 };
 
 const gameNames = Object.keys(games);
