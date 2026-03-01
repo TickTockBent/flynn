@@ -37,7 +37,7 @@ export function generateBreakout(contrib: ContributionGrid): string {
   }
 
   // Paddle and ball
-  const paddleW = 55, paddleH = 7;
+  const paddleW = 70, paddleH = 7;
   const paddleY = areaBottom - 16;
   let paddleX = WIDTH / 2 - paddleW / 2;
 
@@ -49,8 +49,9 @@ export function generateBreakout(contrib: ContributionGrid): string {
   const paddleSamples: string[] = [];
 
   for (let f = 0; f <= totalFrames; f++) {
-    // Paddle tracks ball — fast and responsive
-    paddleX += (bx - paddleX - paddleW / 2) * 0.18;
+    // Paddle tracks ball with anticipation — predict where ball is heading
+    const anticipatedX = bx + vx * 5;
+    paddleX += (anticipatedX - paddleX - paddleW / 2) * 0.35;
     paddleX = clamp(paddleX, margin, WIDTH - margin - paddleW);
 
     bx += vx;
@@ -61,12 +62,12 @@ export function generateBreakout(contrib: ContributionGrid): string {
     if (bx >= WIDTH - margin - ballR) { bx = WIDTH - margin - ballR; vx = -Math.abs(vx); }
     if (by <= areaTop + ballR) { by = areaTop + ballR; vy = Math.abs(vy); }
 
-    // Paddle bounce
-    if (by + ballR >= paddleY && by + ballR <= paddleY + paddleH + 6 &&
-        bx >= paddleX - 4 && bx <= paddleX + paddleW + 4 && vy > 0) {
+    // Paddle bounce — generous hitbox
+    if (by + ballR >= paddleY && by + ballR <= paddleY + paddleH + 8 &&
+        bx >= paddleX - 8 && bx <= paddleX + paddleW + 8 && vy > 0) {
       by = paddleY - ballR;
       vy = -Math.abs(vy);
-      vx += ((bx - paddleX - paddleW / 2) / paddleW) * 4;
+      vx += ((bx - paddleX - paddleW / 2) / paddleW) * 2.5;
     }
 
     // Brick collisions
@@ -114,8 +115,8 @@ export function generateBreakout(contrib: ContributionGrid): string {
   }
 
   const styles = `
-.ball{animation:bm ${duration}s linear infinite}
-.pad{animation:pm ${duration}s linear infinite}
+.ball{animation:bm ${duration}s linear forwards}
+.pad{animation:pm ${duration}s linear forwards}
 .brk{animation:bp 0.15s ease forwards}
 @keyframes bm{${ballSamples.join('')}}
 @keyframes pm{${paddleSamples.join('')}}
