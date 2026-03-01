@@ -57,10 +57,11 @@ export function generateBreakout(contrib: ContributionGrid): string {
     bx += vx;
     by += vy;
 
-    // Wall bounces
-    if (bx <= margin + ballR) { bx = margin + ballR; vx = Math.abs(vx); }
-    if (bx >= WIDTH - margin - ballR) { bx = WIDTH - margin - ballR; vx = -Math.abs(vx); }
-    if (by <= areaTop + ballR) { by = areaTop + ballR; vy = Math.abs(vy); }
+    // Wall bounces — track if any occurred to avoid corner trapping
+    let wallBounced = false;
+    if (bx <= margin + ballR) { bx = margin + ballR; vx = Math.abs(vx); wallBounced = true; }
+    if (bx >= WIDTH - margin - ballR) { bx = WIDTH - margin - ballR; vx = -Math.abs(vx); wallBounced = true; }
+    if (by <= areaTop + ballR) { by = areaTop + ballR; vy = Math.abs(vy); wallBounced = true; }
 
     // Paddle bounce — generous hitbox
     if (by + ballR >= paddleY && by + ballR <= paddleY + paddleH + 8 &&
@@ -70,17 +71,19 @@ export function generateBreakout(contrib: ContributionGrid): string {
       vx += ((bx - paddleX - paddleW / 2) / paddleW) * 2.5;
     }
 
-    // Brick collisions
-    for (const brick of bricks) {
-      if (!brick.alive) continue;
-      if (bx + ballR >= brick.x && bx - ballR <= brick.x + brick.w &&
-          by + ballR >= brick.y && by - ballR <= brick.y + brick.h) {
-        brick.alive = false;
-        brick.destroyTime = (f / totalFrames) * duration;
-        const overlapX = Math.min((bx + ballR) - brick.x, (brick.x + brick.w) - (bx - ballR));
-        const overlapY = Math.min((by + ballR) - brick.y, (brick.y + brick.h) - (by - ballR));
-        if (overlapX < overlapY) { vx = -vx; } else { vy = -vy; }
-        break;
+    // Brick collisions — skip on wall-bounce frames to prevent corner oscillation
+    if (!wallBounced) {
+      for (const brick of bricks) {
+        if (!brick.alive) continue;
+        if (bx + ballR >= brick.x && bx - ballR <= brick.x + brick.w &&
+            by + ballR >= brick.y && by - ballR <= brick.y + brick.h) {
+          brick.alive = false;
+          brick.destroyTime = (f / totalFrames) * duration;
+          const overlapX = Math.min((bx + ballR) - brick.x, (brick.x + brick.w) - (bx - ballR));
+          const overlapY = Math.min((by + ballR) - brick.y, (brick.y + brick.h) - (by - ballR));
+          if (overlapX < overlapY) { vx = -vx; } else { vy = -vy; }
+          break;
+        }
       }
     }
 
