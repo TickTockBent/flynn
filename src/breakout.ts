@@ -1,91 +1,100 @@
-import { WIDTH, HEIGHT, colors, svgWrapper, rand, clamp } from './shared';
+import { ContributionGrid } from './contributions';
+import { WIDTH, HEIGHT, colors, svgWrapper, rand, clamp, contribColors } from './shared';
 
-export function generateBreakout(): string {
-  const duration = 15;
+export function generateBreakout(contrib: ContributionGrid): string {
+  const duration = 12;
   const fps = 30;
   const totalFrames = duration * fps;
-  const sampleEvery = 3;
+  const sampleEvery = 2;
 
-  const margin = 8;
+  const margin = 6;
   const areaTop = 5, areaBottom = HEIGHT - 5;
   const ballR = 3;
 
-  const brickRows = 3, brickCols = 20;
+  // Bricks from contribution graph
   const brickGap = 2;
-  const brickW = (WIDTH - 2 * margin - (brickCols - 1) * brickGap) / brickCols;
-  const brickH = 12;
-  const brickTop = 20;
-  const rowColors = [colors.red, colors.orange, colors.yellow];
+  const brickW = Math.floor((WIDTH - 2 * margin - (contrib.weeks - 1) * brickGap) / contrib.weeks);
+  const brickH = 11;
+  const brickTop = 15;
+  const brickOffsetX = Math.floor((WIDTH - contrib.weeks * (brickW + brickGap) + brickGap) / 2);
 
-  interface Brick { x: number; y: number; alive: boolean; destroyTime: number; color: string }
+  interface Brick { x: number; y: number; w: number; h: number; alive: boolean; destroyTime: number; color: string }
   const bricks: Brick[] = [];
-  for (let r = 0; r < brickRows; r++) {
-    for (let c = 0; c < brickCols; c++) {
+  for (let w = 0; w < contrib.weeks; w++) {
+    for (let d = 0; d < contrib.grid[w].length; d++) {
+      const level = contrib.grid[w][d];
+      if (level === 0) continue;
       bricks.push({
-        x: margin + c * (brickW + brickGap),
-        y: brickTop + r * (brickH + brickGap),
+        x: brickOffsetX + w * (brickW + brickGap),
+        y: brickTop + d * (brickH + brickGap),
+        w: brickW,
+        h: brickH,
         alive: true,
         destroyTime: -1,
-        color: rowColors[r],
+        color: contribColors[level],
       });
     }
   }
 
-  const paddleW = 60, paddleH = 7;
-  const paddleY = areaBottom - 18;
+  // Paddle and ball
+  const paddleW = 55, paddleH = 7;
+  const paddleY = areaBottom - 16;
   let paddleX = WIDTH / 2 - paddleW / 2;
 
-  let bx = WIDTH / 2, by = paddleY - 20;
-  let vx = rand(1.5, 2.5) * (Math.random() > 0.5 ? 1 : -1);
-  let vy = -3;
+  let bx = WIDTH / 2, by = paddleY - 15;
+  let vx = rand(2.5, 3.5) * (Math.random() > 0.5 ? 1 : -1);
+  let vy = -4.5;
 
   const ballSamples: string[] = [];
   const paddleSamples: string[] = [];
 
   for (let f = 0; f <= totalFrames; f++) {
-    paddleX += (bx - paddleX - paddleW / 2) * 0.1;
+    // Paddle tracks ball — fast and responsive
+    paddleX += (bx - paddleX - paddleW / 2) * 0.18;
     paddleX = clamp(paddleX, margin, WIDTH - margin - paddleW);
 
     bx += vx;
     by += vy;
 
+    // Wall bounces
     if (bx <= margin + ballR) { bx = margin + ballR; vx = Math.abs(vx); }
     if (bx >= WIDTH - margin - ballR) { bx = WIDTH - margin - ballR; vx = -Math.abs(vx); }
     if (by <= areaTop + ballR) { by = areaTop + ballR; vy = Math.abs(vy); }
 
-    if (by + ballR >= paddleY && by + ballR <= paddleY + paddleH + 4 &&
-        bx >= paddleX - 2 && bx <= paddleX + paddleW + 2 && vy > 0) {
+    // Paddle bounce
+    if (by + ballR >= paddleY && by + ballR <= paddleY + paddleH + 6 &&
+        bx >= paddleX - 4 && bx <= paddleX + paddleW + 4 && vy > 0) {
       by = paddleY - ballR;
       vy = -Math.abs(vy);
-      vx += ((bx - paddleX - paddleW / 2) / paddleW) * 3;
+      vx += ((bx - paddleX - paddleW / 2) / paddleW) * 4;
     }
 
+    // Brick collisions
     for (const brick of bricks) {
       if (!brick.alive) continue;
-      if (bx + ballR >= brick.x && bx - ballR <= brick.x + brickW &&
-          by + ballR >= brick.y && by - ballR <= brick.y + brickH) {
+      if (bx + ballR >= brick.x && bx - ballR <= brick.x + brick.w &&
+          by + ballR >= brick.y && by - ballR <= brick.y + brick.h) {
         brick.alive = false;
         brick.destroyTime = (f / totalFrames) * duration;
-        const overlapLeft = (bx + ballR) - brick.x;
-        const overlapRight = (brick.x + brickW) - (bx - ballR);
-        const overlapTop = (by + ballR) - brick.y;
-        const overlapBottom = (brick.y + brickH) - (by - ballR);
-        const minOverlapX = Math.min(overlapLeft, overlapRight);
-        const minOverlapY = Math.min(overlapTop, overlapBottom);
-        if (minOverlapX < minOverlapY) { vx = -vx; } else { vy = -vy; }
+        const overlapX = Math.min((bx + ballR) - brick.x, (brick.x + brick.w) - (bx - ballR));
+        const overlapY = Math.min((by + ballR) - brick.y, (brick.y + brick.h) - (by - ballR));
+        if (overlapX < overlapY) { vx = -vx; } else { vy = -vy; }
         break;
       }
     }
 
+    // Ball off bottom — reset
     if (by > areaBottom + 10) {
       bx = WIDTH / 2;
-      by = paddleY - 20;
-      vx = rand(1.5, 2.5) * (Math.random() > 0.5 ? 1 : -1);
-      vy = -3;
+      by = paddleY - 15;
+      vx = rand(2.5, 3.5) * (Math.random() > 0.5 ? 1 : -1);
+      vy = -4.5;
     }
 
+    // Speed clamp
     const spd = Math.sqrt(vx * vx + vy * vy);
-    if (spd > 5) { vx *= 5 / spd; vy *= 5 / spd; }
+    if (spd > 7) { vx *= 7 / spd; vy *= 7 / spd; }
+    if (spd < 3.5) { vx *= 3.5 / spd; vy *= 3.5 / spd; }
 
     if (f % sampleEvery === 0 || f === totalFrames) {
       const pct = ((f / totalFrames) * 100).toFixed(2);
@@ -94,12 +103,13 @@ export function generateBreakout(): string {
     }
   }
 
+  // Build brick elements
   let brickElements = '';
   for (const brick of bricks) {
     if (brick.destroyTime >= 0) {
-      brickElements += `<rect class="brk" x="${brick.x.toFixed(1)}" y="${brick.y}" width="${brickW.toFixed(1)}" height="${brickH}" rx="1" fill="${brick.color}" style="animation-delay:${brick.destroyTime.toFixed(2)}s"/>`;
+      brickElements += `<rect class="brk" x="${brick.x.toFixed(1)}" y="${brick.y}" width="${brick.w}" height="${brick.h}" rx="1" fill="${brick.color}" style="animation-delay:${brick.destroyTime.toFixed(2)}s"/>`;
     } else {
-      brickElements += `<rect x="${brick.x.toFixed(1)}" y="${brick.y}" width="${brickW.toFixed(1)}" height="${brickH}" rx="1" fill="${brick.color}"/>`;
+      brickElements += `<rect x="${brick.x.toFixed(1)}" y="${brick.y}" width="${brick.w}" height="${brick.h}" rx="1" fill="${brick.color}"/>`;
     }
   }
 

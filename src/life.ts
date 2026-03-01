@@ -1,26 +1,26 @@
-import { WIDTH, HEIGHT, colors, svgWrapper } from './shared';
+import { ContributionGrid } from './contributions';
+import { WIDTH, HEIGHT, colors, svgWrapper, contribColors, contribGridLayout } from './shared';
 
-export function generateLife(): string {
+export function generateLife(contrib: ContributionGrid): string {
   const duration = 15;
-  const cellSize = 14;
-  const gap = 1;
+  const layout = contribGridLayout(contrib);
+  const { cellSize, gap, offsetX, offsetY } = layout;
   const step = cellSize + gap;
-  const margin = 8;
+  const cols = contrib.weeks;
+  const rows = 7;
 
-  const cols = Math.floor((WIDTH - 2 * margin) / step);
-  const rows = Math.floor((HEIGHT - 2 * margin) / step);
-  const offsetX = margin + ((WIDTH - 2 * margin) - cols * step + gap) / 2;
-  const offsetY = margin + ((HEIGHT - 2 * margin) - rows * step + gap) / 2;
+  const generations = 30;
 
-  const generations = 25;
-  const genDuration = duration / generations;
-
-  // Initialize random grid (~30% fill)
+  // Seed from contribution graph: any contribution = alive
   let currentGrid: boolean[][] = [];
+  const initialLevel: number[][] = [];
   for (let r = 0; r < rows; r++) {
     currentGrid[r] = [];
+    initialLevel[r] = [];
     for (let c = 0; c < cols; c++) {
-      currentGrid[r][c] = Math.random() < 0.3;
+      const level = (contrib.grid[c] && contrib.grid[c][r]) ? contrib.grid[c][r] : 0;
+      currentGrid[r][c] = level > 0;
+      initialLevel[r][c] = level;
     }
   }
 
@@ -53,13 +53,10 @@ export function generateLife(): string {
     history.push(nextGrid.map(row => [...row]));
   }
 
-  // For each cell, build a timeline of alive/dead states
-  // Only create elements for cells that are ever alive
+  // Build animated cells — only for cells that are ever alive
   let cellElements = '';
   let cellStyles = '';
   let cellIndex = 0;
-
-  const accentColors = [colors.blue, colors.cyan, colors.magenta, colors.green];
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -70,25 +67,31 @@ export function generateLife(): string {
       const px = offsetX + c * step;
       const py = offsetY + r * step;
 
-      // Build keyframe string
-      const keyframeStops: string[] = [];
-      for (let g = 0; g < generations; g++) {
-        const pctStart = ((g / generations) * 100).toFixed(2);
-        const opacity = timeline[g] ? '0.75' : '0';
-        keyframeStops.push(`${pctStart}%{opacity:${opacity}}`);
+      // Color from initial contribution level, or a default for newly born cells
+      const origLevel = initialLevel[r][c];
+      let cellColor: string;
+      if (origLevel > 0) {
+        cellColor = contribColors[origLevel];
+      } else {
+        // Cells born through Conway's rules glow blue/purple
+        cellColor = [colors.blue, colors.cyan, colors.magenta, colors.green][(r + c) % 4];
       }
-      keyframeStops.push('100%{opacity:0}');
 
-      // Pick color based on position for visual variety
-      const colorChoice = accentColors[(r + c) % accentColors.length];
+      // Build keyframe stops
+      const stops: string[] = [];
+      for (let g = 0; g < generations; g++) {
+        const pct = ((g / generations) * 100).toFixed(2);
+        const opacity = timeline[g] ? '0.8' : '0';
+        stops.push(`${pct}%{opacity:${opacity}}`);
+      }
+      stops.push('100%{opacity:0}');
 
-      cellElements += `<rect class="c${cellIndex}" x="${px}" y="${py}" width="${cellSize}" height="${cellSize}" rx="2" fill="${colorChoice}" opacity="0"/>`;
+      cellElements += `<rect class="c${cellIndex}" x="${px.toFixed(1)}" y="${py.toFixed(1)}" width="${cellSize}" height="${cellSize}" rx="2" fill="${cellColor}" opacity="0"/>`;
       cellStyles += `.c${cellIndex}{animation:c${cellIndex} ${duration}s step-end infinite}`;
-      cellStyles += `@keyframes c${cellIndex}{${keyframeStops.join('')}}`;
+      cellStyles += `@keyframes c${cellIndex}{${stops.join('')}}`;
       cellIndex++;
     }
   }
 
-  const content = cellElements;
-  return svgWrapper('GAME OF LIFE', cellStyles, content);
+  return svgWrapper('GAME OF LIFE', cellStyles, cellElements);
 }
