@@ -1,0 +1,13 @@
+{
+  "name": "flynn",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Random arcade game SVG for your GitHub profile",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "devDependencies": {
+    "@vercel/node": "^3.0.0",
+    "typescript": "^5.3.0"
+  }
+}
