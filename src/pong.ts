@@ -18,10 +18,10 @@ const RIGHT_PADDLE_X = WIDTH - PADDLE_MARGIN - PADDLE_W;
 export function generatePong(contrib: ContributionGrid): string {
   // ── Ball state ─────────────────────────────────────────────────────────────
 
-  const baseSpeed = 5.5;
+  const baseSpeed = 9.0;
   let bx = WIDTH / 2, by = (AREA_TOP + AREA_BOTTOM) / 2;
-  let vx = baseSpeed * (Math.random() > 0.5 ? 1 : -1);
-  let vy = rand(-2.5, 2.5);
+  let vx = rand(6.5, 8.0) * (Math.random() > 0.5 ? 1 : -1);
+  let vy = rand(3.5, 5.5) * (Math.random() > 0.5 ? 1 : -1);
 
   // ── Paddle AI state ────────────────────────────────────────────────────────
 
@@ -36,11 +36,11 @@ export function generatePong(contrib: ContributionGrid): string {
     overshootBias: number; // tendency to overshoot target
   }
 
-  // Left paddle: "The Aggressive" — fast but overshoots, bigger errors
+  // Left paddle: "The Aggressive" — faster but bigger errors
   const leftAI: PaddleAI = {
     y: by - PADDLE_H / 2,
-    maxSpeed: 5.0,
-    predictionError: rand(-28, 28),
+    maxSpeed: 2.0,
+    predictionError: rand(-50, 50),
     reactionDelay: Math.floor(rand(3, 7)),
     reactionCountdown: 0,
     lastPredictedY: by,
@@ -48,11 +48,11 @@ export function generatePong(contrib: ContributionGrid): string {
     overshootBias: rand(6, 14),
   };
 
-  // Right paddle: "The Steady" — moderate speed, less error, less overshoot
+  // Right paddle: "The Steady" — slower, less error
   const rightAI: PaddleAI = {
     y: by - PADDLE_H / 2,
-    maxSpeed: 4.2,
-    predictionError: rand(-22, 22),
+    maxSpeed: 1.8,
+    predictionError: rand(-40, 40),
     reactionDelay: Math.floor(rand(4, 9)),
     reactionCountdown: 0,
     lastPredictedY: by,
@@ -90,53 +90,36 @@ export function generatePong(contrib: ContributionGrid): string {
 
   function updatePaddle(ai: PaddleAI, paddleX: number, isLeft: boolean): void {
     const ballComingToward = isLeft ? vx < 0 : vx > 0;
-    const center = (AREA_TOP + AREA_BOTTOM) / 2 - PADDLE_H / 2;
+    const ballOnMySide = isLeft ? bx < WIDTH * 0.5 : bx > WIDTH * 0.5;
 
-    // Ball going away — drift toward center lazily
-    if (!ballComingToward) {
-      ai.reactionCountdown = ai.reactionDelay;
-      const diff = center - ai.y;
-      ai.y += clamp(diff, -2.5, 2.5);
-      ai.y = clamp(ai.y, AREA_TOP, AREA_BOTTOM - PADDLE_H);
-      return;
-    }
-
-    // Detect ball direction change — reset reaction
+    // Re-roll prediction error when ball changes direction
     const dirChanged = isLeft ? (ai.lastBallVx >= 0 && vx < 0) : (ai.lastBallVx <= 0 && vx > 0);
     if (dirChanged) {
-      ai.reactionCountdown = ai.reactionDelay;
-      ai.predictionError = isLeft ? rand(-28, 28) : rand(-22, 22);
-      ai.overshootBias = isLeft ? rand(6, 14) : rand(3, 8);
+      ai.predictionError = isLeft ? rand(-50, 50) : rand(-40, 40);
+      ai.lastPredictedY = 0;
     }
     ai.lastBallVx = vx;
 
-    // During reaction delay — move toward stale prediction
-    if (ai.reactionCountdown > 0) {
-      ai.reactionCountdown--;
-      const target = ai.lastPredictedY - PADDLE_H / 2;
-      const diff = target - ai.y;
-      ai.y += clamp(diff, -ai.maxSpeed * 0.4, ai.maxSpeed * 0.4);
-      ai.y = clamp(ai.y, AREA_TOP, AREA_BOTTOM - PADDLE_H);
-      return;
+    let targetY: number;
+
+    if (!ballComingToward) {
+      // Ball going away — follow ball's Y reactively (paddle stays alive visually)
+      targetY = by;
+      ai.lastPredictedY = 0;
+    } else if (!ballOnMySide) {
+      // Ball coming but on far side — follow loosely with mild error
+      targetY = by + ai.predictionError * 0.3;
+    } else {
+      // Ball on my half — COMMIT to predicted arrival Y (lock in)
+      if (ai.lastPredictedY === 0) {
+        const targetX = isLeft ? PADDLE_MARGIN + PADDLE_W + BALL_R : RIGHT_PADDLE_X - BALL_R;
+        ai.lastPredictedY = projectBallY(bx, by, vx, vy, targetX) + ai.predictionError;
+      }
+      targetY = ai.lastPredictedY;
     }
 
-    // Only recalculate prediction on direction change (locked in by dirChanged above)
-    // Otherwise keep moving toward the locked prediction
-    if (dirChanged || ai.lastPredictedY === 0) {
-      const targetX = isLeft ? PADDLE_MARGIN + PADDLE_W + BALL_R : RIGHT_PADDLE_X - BALL_R;
-      const predictedY = projectBallY(bx, by, vx, vy, targetX);
-      ai.lastPredictedY = predictedY + ai.predictionError;
-    }
-
-    // Move toward locked prediction with overshoot
-    const target = ai.lastPredictedY - PADDLE_H / 2;
-    let diff = target - ai.y;
-
-    // Overshoot: if close to target, momentum carries past
-    if (Math.abs(diff) < PADDLE_H * 0.3) {
-      diff += ai.overshootBias * (diff >= 0 ? 1 : -1);
-    }
-
+    const desiredPaddleY = targetY - PADDLE_H / 2;
+    const diff = desiredPaddleY - ai.y;
     ai.y += clamp(diff, -ai.maxSpeed, ai.maxSpeed);
     ai.y = clamp(ai.y, AREA_TOP, AREA_BOTTOM - PADDLE_H);
   }
@@ -160,22 +143,26 @@ export function generatePong(contrib: ContributionGrid): string {
     if (by <= AREA_TOP + BALL_R) { by = AREA_TOP + BALL_R; vy = Math.abs(vy); }
     if (by >= AREA_BOTTOM - BALL_R) { by = AREA_BOTTOM - BALL_R; vy = -Math.abs(vy); }
 
-    // Left paddle bounce
+    // Left paddle bounce — steep angle reflection
     if (bx - BALL_R <= PADDLE_MARGIN + PADDLE_W && vx < 0 &&
         by >= leftAI.y - 3 && by <= leftAI.y + PADDLE_H + 3) {
       bx = PADDLE_MARGIN + PADDLE_W + BALL_R;
       const hitOffset = (by - leftAI.y - PADDLE_H / 2) / (PADDLE_H / 2);
-      vx = Math.abs(vx) * 1.05;
-      vy += hitOffset * 2.5;
+      const spd = Math.sqrt(vx * vx + vy * vy) * 1.03;
+      const angle = hitOffset * 55 * (Math.PI / 180);
+      vx = spd * Math.cos(angle);
+      vy = spd * Math.sin(angle);
     }
 
-    // Right paddle bounce
+    // Right paddle bounce — steep angle reflection
     if (bx + BALL_R >= RIGHT_PADDLE_X && vx > 0 &&
         by >= rightAI.y - 3 && by <= rightAI.y + PADDLE_H + 3) {
       bx = RIGHT_PADDLE_X - BALL_R;
       const hitOffset = (by - rightAI.y - PADDLE_H / 2) / (PADDLE_H / 2);
-      vx = -Math.abs(vx) * 1.05;
-      vy += hitOffset * 2.5;
+      const spd = Math.sqrt(vx * vx + vy * vy) * 1.03;
+      const angle = hitOffset * 55 * (Math.PI / 180);
+      vx = -spd * Math.cos(angle);
+      vy = spd * Math.sin(angle);
     }
 
     // Speed management
@@ -188,10 +175,10 @@ export function generatePong(contrib: ContributionGrid): string {
       leftScore++;
       scoreFrames.push({ frame: f, side: 'left' });
       bx = WIDTH / 2; by = (AREA_TOP + AREA_BOTTOM) / 2;
-      vx = -baseSpeed; vy = rand(-2, 2);
+      vx = rand(-8, -6.5); vy = rand(3.5, 5.5) * (Math.random() > 0.5 ? 1 : -1);
       // Re-roll AI errors for new rally
-      leftAI.predictionError = rand(-28, 28);
-      rightAI.predictionError = rand(-22, 22);
+      leftAI.predictionError = rand(-50, 50);
+      rightAI.predictionError = rand(-40, 40);
       leftAI.reactionCountdown = leftAI.reactionDelay;
       rightAI.reactionCountdown = rightAI.reactionDelay;
     }
@@ -201,9 +188,9 @@ export function generatePong(contrib: ContributionGrid): string {
       rightScore++;
       scoreFrames.push({ frame: f, side: 'right' });
       bx = WIDTH / 2; by = (AREA_TOP + AREA_BOTTOM) / 2;
-      vx = baseSpeed; vy = rand(-2, 2);
-      leftAI.predictionError = rand(-28, 28);
-      rightAI.predictionError = rand(-22, 22);
+      vx = rand(6.5, 8); vy = rand(3.5, 5.5) * (Math.random() > 0.5 ? 1 : -1);
+      leftAI.predictionError = rand(-50, 50);
+      rightAI.predictionError = rand(-40, 40);
       leftAI.reactionCountdown = leftAI.reactionDelay;
       rightAI.reactionCountdown = rightAI.reactionDelay;
     }
