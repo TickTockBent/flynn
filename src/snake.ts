@@ -144,36 +144,27 @@ export function generateSnake(contrib: ContributionGrid): string {
 
       let score = 0;
 
-      if (food) {
-        const distToFood = Math.abs(nx - food.x) + Math.abs(ny - food.y);
-
-        if (distToFood <= 6) {
-          // Close to food — pursue directly
-          score -= distToFood * 3;
-        } else {
-          // Far from food — head toward food with some organic variation
-          score -= distToFood * 1.5;
-          score += Math.random() * 2; // mild wander for natural-looking paths
-        }
-      }
-
-      // Prefer current direction slightly
-      if (d === direction) score += 0.8;
-
-      // Open neighbors
+      // Open neighbors (safety factor — avoid boxing ourselves in)
       let openNeighbors = 0;
       for (let nd = 0; nd < 4; nd++) {
         const nnx = nx + dx[nd], nny = ny + dy[nd];
         if (nnx >= 0 && nnx < cols && nny >= 0 && nny < rows && !occupied.has(key(nnx, nny))) openNeighbors++;
       }
-      score += openNeighbors * 1.5;
 
-      // Mild edge avoidance
-      if (nx <= 0 || nx >= cols - 1) score -= 0.5;
-      if (ny <= 0 || ny >= rows - 1) score -= 0.5;
+      if (food) {
+        const distToFood = Math.abs(nx - food.x) + Math.abs(ny - food.y);
+        // Food is the primary objective — score dominates other factors
+        score -= distToFood * 10;
+        // Mild organic variation only when far
+        if (distToFood > 10) score += Math.random() * 3;
+      }
 
-      // Bonus for reachable space (prefer open areas)
-      score += Math.min(reachable, 20) * 0.3;
+      // Secondary factors — kept small so food always wins
+      if (d === direction) score += 0.5;
+      score += openNeighbors * 0.5;
+      if (nx <= 0 || nx >= cols - 1) score -= 0.3;
+      if (ny <= 0 || ny >= rows - 1) score -= 0.3;
+      score += Math.min(reachable, 20) * 0.1;
 
       if (score > bestScore) { bestScore = score; bestDir = d; }
     }

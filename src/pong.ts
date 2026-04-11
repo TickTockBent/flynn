@@ -36,28 +36,28 @@ export function generatePong(contrib: ContributionGrid): string {
     overshootBias: number; // tendency to overshoot target
   }
 
-  // Left paddle: "The Aggressive" — faster but overshoots, bigger errors
+  // Left paddle: "The Aggressive" — fast but overshoots, bigger errors
   const leftAI: PaddleAI = {
     y: by - PADDLE_H / 2,
-    maxSpeed: 3.2,
-    predictionError: rand(-30, 30),
-    reactionDelay: Math.floor(rand(5, 10)),
+    maxSpeed: 5.0,
+    predictionError: rand(-28, 28),
+    reactionDelay: Math.floor(rand(3, 7)),
     reactionCountdown: 0,
     lastPredictedY: by,
     lastBallVx: vx,
-    overshootBias: rand(5, 12),
+    overshootBias: rand(6, 14),
   };
 
-  // Right paddle: "The Steady" — slower, more precise, less overshoot
+  // Right paddle: "The Steady" — moderate speed, less error, less overshoot
   const rightAI: PaddleAI = {
     y: by - PADDLE_H / 2,
-    maxSpeed: 2.8,
-    predictionError: rand(-25, 25),
-    reactionDelay: Math.floor(rand(6, 12)),
+    maxSpeed: 4.2,
+    predictionError: rand(-22, 22),
+    reactionDelay: Math.floor(rand(4, 9)),
     reactionCountdown: 0,
     lastPredictedY: by,
     lastBallVx: vx,
-    overshootBias: rand(2, 6),
+    overshootBias: rand(3, 8),
   };
 
   let leftScore = 0, rightScore = 0;
@@ -96,7 +96,7 @@ export function generatePong(contrib: ContributionGrid): string {
     if (!ballComingToward) {
       ai.reactionCountdown = ai.reactionDelay;
       const diff = center - ai.y;
-      ai.y += clamp(diff, -1.5, 1.5);
+      ai.y += clamp(diff, -2.5, 2.5);
       ai.y = clamp(ai.y, AREA_TOP, AREA_BOTTOM - PADDLE_H);
       return;
     }
@@ -105,8 +105,8 @@ export function generatePong(contrib: ContributionGrid): string {
     const dirChanged = isLeft ? (ai.lastBallVx >= 0 && vx < 0) : (ai.lastBallVx <= 0 && vx > 0);
     if (dirChanged) {
       ai.reactionCountdown = ai.reactionDelay;
-      ai.predictionError = isLeft ? rand(-30, 30) : rand(-25, 25);
-      ai.overshootBias = isLeft ? rand(5, 12) : rand(2, 6);
+      ai.predictionError = isLeft ? rand(-28, 28) : rand(-22, 22);
+      ai.overshootBias = isLeft ? rand(6, 14) : rand(3, 8);
     }
     ai.lastBallVx = vx;
 
@@ -190,8 +190,8 @@ export function generatePong(contrib: ContributionGrid): string {
       bx = WIDTH / 2; by = (AREA_TOP + AREA_BOTTOM) / 2;
       vx = -baseSpeed; vy = rand(-2, 2);
       // Re-roll AI errors for new rally
-      leftAI.predictionError = rand(-30, 30);
-      rightAI.predictionError = rand(-25, 25);
+      leftAI.predictionError = rand(-28, 28);
+      rightAI.predictionError = rand(-22, 22);
       leftAI.reactionCountdown = leftAI.reactionDelay;
       rightAI.reactionCountdown = rightAI.reactionDelay;
     }
@@ -202,8 +202,8 @@ export function generatePong(contrib: ContributionGrid): string {
       scoreFrames.push({ frame: f, side: 'right' });
       bx = WIDTH / 2; by = (AREA_TOP + AREA_BOTTOM) / 2;
       vx = baseSpeed; vy = rand(-2, 2);
-      leftAI.predictionError = rand(-30, 30);
-      rightAI.predictionError = rand(-25, 25);
+      leftAI.predictionError = rand(-28, 28);
+      rightAI.predictionError = rand(-22, 22);
       leftAI.reactionCountdown = leftAI.reactionDelay;
       rightAI.reactionCountdown = rightAI.reactionDelay;
     }
