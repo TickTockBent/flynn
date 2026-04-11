@@ -1,113 +1,290 @@
 import { ContributionGrid } from './contributions';
 import { WIDTH, HEIGHT, colors, svgWrapper, rand, clamp, renderContribBackground, contribGridLayout } from './shared';
 
+const DURATION = 12;
+const FPS = 30;
+const TOTAL_FRAMES = DURATION * FPS;
+const SAMPLE_EVERY = 2;
+
+const PADDLE_W = 8;
+const PADDLE_H = 35;
+const PADDLE_MARGIN = 20;
+const BALL_R = 4;
+const AREA_TOP = 22;
+const AREA_BOTTOM = HEIGHT - 5;
+
+const RIGHT_PADDLE_X = WIDTH - PADDLE_MARGIN - PADDLE_W;
+
 export function generatePong(contrib: ContributionGrid): string {
-  const duration = 10;
-  const fps = 30;
-  const totalFrames = duration * fps;
-  const sampleEvery = 2;
+  // ── Ball state ─────────────────────────────────────────────────────────────
 
-  const paddleW = 8, paddleH = 35, paddleMargin = 20;
-  const ballR = 4;
-  const areaTop = 22, areaBottom = HEIGHT - 5;
-  const rightPaddleX = WIDTH - paddleMargin - paddleW;
-
-  let bx = WIDTH / 2, by = (areaTop + areaBottom) / 2;
-  const baseSpeed = 5.0;
+  const baseSpeed = 5.5;
+  let bx = WIDTH / 2, by = (AREA_TOP + AREA_BOTTOM) / 2;
   let vx = baseSpeed * (Math.random() > 0.5 ? 1 : -1);
   let vy = rand(-2.5, 2.5);
 
-  let lpy = by - paddleH / 2, rpy = by - paddleH / 2;
+  // ── Paddle AI state ────────────────────────────────────────────────────────
+
+  interface PaddleAI {
+    y: number;
+    maxSpeed: number;
+    predictionError: number;
+    reactionDelay: number;
+    reactionCountdown: number;
+    lastPredictedY: number;
+    lastBallVx: number;
+    overshootBias: number; // tendency to overshoot target
+  }
+
+  // Left paddle: "The Aggressive" — faster but overshoots, bigger errors
+  const leftAI: PaddleAI = {
+    y: by - PADDLE_H / 2,
+    maxSpeed: 3.2,
+    predictionError: rand(-30, 30),
+    reactionDelay: Math.floor(rand(5, 10)),
+    reactionCountdown: 0,
+    lastPredictedY: by,
+    lastBallVx: vx,
+    overshootBias: rand(5, 12),
+  };
+
+  // Right paddle: "The Steady" — slower, more precise, less overshoot
+  const rightAI: PaddleAI = {
+    y: by - PADDLE_H / 2,
+    maxSpeed: 2.8,
+    predictionError: rand(-25, 25),
+    reactionDelay: Math.floor(rand(6, 12)),
+    reactionCountdown: 0,
+    lastPredictedY: by,
+    lastBallVx: vx,
+    overshootBias: rand(2, 6),
+  };
+
   let leftScore = 0, rightScore = 0;
+
+  // Track score change frames for flash effect
+  const scoreFrames: { frame: number; side: 'left' | 'right' }[] = [];
+
+  // ── Ball trajectory projection ─────────────────────────────────────────────
+
+  function projectBallY(fromX: number, fromY: number, velX: number, velY: number, targetX: number): number {
+    let x = fromX, y = fromY, dvx = velX, dvy = velY;
+    // Don't project if ball is moving away from target
+    if ((targetX > x && dvx < 0) || (targetX < x && dvx > 0)) return y;
+
+    for (let i = 0; i < 500; i++) {
+      const stepsToTarget = (targetX - x) / dvx;
+      if (stepsToTarget <= 1 && stepsToTarget >= 0) {
+        return y + dvy * stepsToTarget;
+      }
+      x += dvx;
+      y += dvy;
+      // Wall bounces (top/bottom)
+      if (y <= AREA_TOP + BALL_R) { y = AREA_TOP + BALL_R; dvy = Math.abs(dvy); }
+      if (y >= AREA_BOTTOM - BALL_R) { y = AREA_BOTTOM - BALL_R; dvy = -Math.abs(dvy); }
+    }
+    return y;
+  }
+
+  // ── Paddle AI update ───────────────────────────────────────────────────────
+
+  function updatePaddle(ai: PaddleAI, paddleX: number, isLeft: boolean): void {
+    const ballComingToward = isLeft ? vx < 0 : vx > 0;
+    const center = (AREA_TOP + AREA_BOTTOM) / 2 - PADDLE_H / 2;
+
+    // Ball going away — drift toward center lazily
+    if (!ballComingToward) {
+      ai.reactionCountdown = ai.reactionDelay;
+      const diff = center - ai.y;
+      ai.y += clamp(diff, -1.5, 1.5);
+      ai.y = clamp(ai.y, AREA_TOP, AREA_BOTTOM - PADDLE_H);
+      return;
+    }
+
+    // Detect ball direction change — reset reaction
+    const dirChanged = isLeft ? (ai.lastBallVx >= 0 && vx < 0) : (ai.lastBallVx <= 0 && vx > 0);
+    if (dirChanged) {
+      ai.reactionCountdown = ai.reactionDelay;
+      ai.predictionError = isLeft ? rand(-30, 30) : rand(-25, 25);
+      ai.overshootBias = isLeft ? rand(5, 12) : rand(2, 6);
+    }
+    ai.lastBallVx = vx;
+
+    // During reaction delay — move toward stale prediction
+    if (ai.reactionCountdown > 0) {
+      ai.reactionCountdown--;
+      const target = ai.lastPredictedY - PADDLE_H / 2;
+      const diff = target - ai.y;
+      ai.y += clamp(diff, -ai.maxSpeed * 0.4, ai.maxSpeed * 0.4);
+      ai.y = clamp(ai.y, AREA_TOP, AREA_BOTTOM - PADDLE_H);
+      return;
+    }
+
+    // Only recalculate prediction on direction change (locked in by dirChanged above)
+    // Otherwise keep moving toward the locked prediction
+    if (dirChanged || ai.lastPredictedY === 0) {
+      const targetX = isLeft ? PADDLE_MARGIN + PADDLE_W + BALL_R : RIGHT_PADDLE_X - BALL_R;
+      const predictedY = projectBallY(bx, by, vx, vy, targetX);
+      ai.lastPredictedY = predictedY + ai.predictionError;
+    }
+
+    // Move toward locked prediction with overshoot
+    const target = ai.lastPredictedY - PADDLE_H / 2;
+    let diff = target - ai.y;
+
+    // Overshoot: if close to target, momentum carries past
+    if (Math.abs(diff) < PADDLE_H * 0.3) {
+      diff += ai.overshootBias * (diff >= 0 ? 1 : -1);
+    }
+
+    ai.y += clamp(diff, -ai.maxSpeed, ai.maxSpeed);
+    ai.y = clamp(ai.y, AREA_TOP, AREA_BOTTOM - PADDLE_H);
+  }
+
+  // ── Simulation ─────────────────────────────────────────────────────────────
 
   const ballSamples: string[] = [];
   const lpSamples: string[] = [];
   const rpSamples: string[] = [];
 
-  for (let f = 0; f <= totalFrames; f++) {
-    // Paddles track ball — active side tracks faster, far side drifts
-    const leftActive = bx < WIDTH * 0.55;
-    const rightActive = bx > WIDTH * 0.45;
-    lpy += (by - lpy - paddleH / 2) * (leftActive ? 0.12 : 0.03);
-    rpy += (by - rpy - paddleH / 2) * (rightActive ? 0.10 : 0.03);
-    // Add slight imperfection
-    lpy += rand(-0.3, 0.3);
-    rpy += rand(-0.3, 0.3);
-    lpy = clamp(lpy, areaTop, areaBottom - paddleH);
-    rpy = clamp(rpy, areaTop, areaBottom - paddleH);
+  for (let f = 0; f <= TOTAL_FRAMES; f++) {
+    // Update paddles
+    updatePaddle(leftAI, PADDLE_MARGIN, true);
+    updatePaddle(rightAI, RIGHT_PADDLE_X, false);
 
+    // Move ball
     bx += vx;
     by += vy;
 
-    // Wall bounce
-    if (by <= areaTop + ballR) { by = areaTop + ballR; vy = Math.abs(vy); }
-    if (by >= areaBottom - ballR) { by = areaBottom - ballR; vy = -Math.abs(vy); }
+    // Wall bounces (top/bottom)
+    if (by <= AREA_TOP + BALL_R) { by = AREA_TOP + BALL_R; vy = Math.abs(vy); }
+    if (by >= AREA_BOTTOM - BALL_R) { by = AREA_BOTTOM - BALL_R; vy = -Math.abs(vy); }
 
     // Left paddle bounce
-    if (bx - ballR <= paddleMargin + paddleW && vx < 0 && by >= lpy - 2 && by <= lpy + paddleH + 2) {
-      bx = paddleMargin + paddleW + ballR;
+    if (bx - BALL_R <= PADDLE_MARGIN + PADDLE_W && vx < 0 &&
+        by >= leftAI.y - 3 && by <= leftAI.y + PADDLE_H + 3) {
+      bx = PADDLE_MARGIN + PADDLE_W + BALL_R;
+      const hitOffset = (by - leftAI.y - PADDLE_H / 2) / (PADDLE_H / 2);
       vx = Math.abs(vx) * 1.05;
-      vy += ((by - lpy - paddleH / 2) / paddleH) * 3;
+      vy += hitOffset * 2.5;
     }
 
     // Right paddle bounce
-    if (bx + ballR >= rightPaddleX && vx > 0 && by >= rpy - 2 && by <= rpy + paddleH + 2) {
-      bx = rightPaddleX - ballR;
+    if (bx + BALL_R >= RIGHT_PADDLE_X && vx > 0 &&
+        by >= rightAI.y - 3 && by <= rightAI.y + PADDLE_H + 3) {
+      bx = RIGHT_PADDLE_X - BALL_R;
+      const hitOffset = (by - rightAI.y - PADDLE_H / 2) / (PADDLE_H / 2);
       vx = -Math.abs(vx) * 1.05;
-      vy += ((by - rpy - paddleH / 2) / paddleH) * 3;
+      vy += hitOffset * 2.5;
     }
 
-    // Speed clamp
+    // Speed management
     const spd = Math.sqrt(vx * vx + vy * vy);
-    if (spd > 8) { vx *= 8 / spd; vy *= 8 / spd; }
+    if (spd > 9) { vx *= 9 / spd; vy *= 9 / spd; }
     if (Math.abs(vy) < 0.8) vy += vy >= 0 ? 0.5 : -0.5;
 
-    // Score
-    if (bx < -5) {
-      rightScore++;
-      bx = WIDTH / 2; by = (areaTop + areaBottom) / 2;
-      vx = baseSpeed; vy = rand(-2, 2);
-    }
+    // Left scores (ball off right)
     if (bx > WIDTH + 5) {
       leftScore++;
-      bx = WIDTH / 2; by = (areaTop + areaBottom) / 2;
+      scoreFrames.push({ frame: f, side: 'left' });
+      bx = WIDTH / 2; by = (AREA_TOP + AREA_BOTTOM) / 2;
       vx = -baseSpeed; vy = rand(-2, 2);
+      // Re-roll AI errors for new rally
+      leftAI.predictionError = rand(-30, 30);
+      rightAI.predictionError = rand(-25, 25);
+      leftAI.reactionCountdown = leftAI.reactionDelay;
+      rightAI.reactionCountdown = rightAI.reactionDelay;
     }
 
-    if (f % sampleEvery === 0 || f === totalFrames) {
-      const pct = ((f / totalFrames) * 100).toFixed(2);
+    // Right scores (ball off left)
+    if (bx < -5) {
+      rightScore++;
+      scoreFrames.push({ frame: f, side: 'right' });
+      bx = WIDTH / 2; by = (AREA_TOP + AREA_BOTTOM) / 2;
+      vx = baseSpeed; vy = rand(-2, 2);
+      leftAI.predictionError = rand(-30, 30);
+      rightAI.predictionError = rand(-25, 25);
+      leftAI.reactionCountdown = leftAI.reactionDelay;
+      rightAI.reactionCountdown = rightAI.reactionDelay;
+    }
+
+    // Sample
+    if (f % SAMPLE_EVERY === 0 || f === TOTAL_FRAMES) {
+      const pct = ((f / TOTAL_FRAMES) * 100).toFixed(2);
       ballSamples.push(`${pct}%{transform:translate(${bx.toFixed(1)}px,${by.toFixed(1)}px)}`);
-      lpSamples.push(`${pct}%{transform:translateY(${lpy.toFixed(1)}px)}`);
-      rpSamples.push(`${pct}%{transform:translateY(${rpy.toFixed(1)}px)}`);
+      lpSamples.push(`${pct}%{transform:translateY(${leftAI.y.toFixed(1)}px)}`);
+      rpSamples.push(`${pct}%{transform:translateY(${rightAI.y.toFixed(1)}px)}`);
     }
   }
 
-  // Contribution background
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   const layout = contribGridLayout(contrib);
   const contribBg = renderContribBackground(contrib, layout.cellSize, layout.gap, layout.offsetX, layout.offsetY, 0.2);
 
   // Center dashed line
   let centerLine = '';
-  for (let y = areaTop; y < areaBottom; y += 12) {
+  for (let y = AREA_TOP; y < AREA_BOTTOM; y += 12) {
     centerLine += `<rect x="${WIDTH / 2 - 1}" y="${y}" width="2" height="6" fill="${colors.dimmed}" opacity="0.3"/>`;
   }
 
-  const styles = `
-.ball{animation:bm ${duration}s linear infinite}
-.lp{animation:lpm ${duration}s linear infinite}
-.rp{animation:rpm ${duration}s linear infinite}
-@keyframes bm{${ballSamples.join('')}}
-@keyframes lpm{${lpSamples.join('')}}
-@keyframes rpm{${rpSamples.join('')}}`;
+  // SVG defs for ball glow
+  const defs = `
+  <radialGradient id="pongGlow">
+    <stop offset="0%" stop-color="${colors.yellow}" stop-opacity="0.6"/>
+    <stop offset="100%" stop-color="${colors.yellow}" stop-opacity="0"/>
+  </radialGradient>`;
+
+  // Styles
+  let allStyles = '';
+  allStyles += `.ball,.ball-glow{animation:bm ${DURATION}s linear infinite}`;
+  allStyles += `@keyframes bm{${ballSamples.join('')}}`;
+  allStyles += `.lp{animation:lpm ${DURATION}s linear infinite}`;
+  allStyles += `@keyframes lpm{${lpSamples.join('')}}`;
+  allStyles += `.rp{animation:rpm ${DURATION}s linear infinite}`;
+  allStyles += `@keyframes rpm{${rpSamples.join('')}}`;
+
+  // Score flash keyframes — brief opacity pulse on score
+  let scoreFlashElements = '';
+  if (scoreFrames.length > 0) {
+    const leftFlashStops: string[] = ['0%{opacity:0}'];
+    const rightFlashStops: string[] = ['0%{opacity:0}'];
+
+    for (const sf of scoreFrames) {
+      const pct = ((sf.frame / TOTAL_FRAMES) * 100).toFixed(2);
+      const pctEnd = (((sf.frame + 8) / TOTAL_FRAMES) * 100).toFixed(2);
+      if (sf.side === 'left') {
+        leftFlashStops.push(`${pct}%{opacity:0.8}`);
+        leftFlashStops.push(`${pctEnd}%{opacity:0}`);
+      } else {
+        rightFlashStops.push(`${pct}%{opacity:0.8}`);
+        rightFlashStops.push(`${pctEnd}%{opacity:0}`);
+      }
+    }
+    leftFlashStops.push('100%{opacity:0}');
+    rightFlashStops.push('100%{opacity:0}');
+
+    allStyles += `.lf{animation:lf ${DURATION}s step-end infinite}`;
+    allStyles += `@keyframes lf{${leftFlashStops.join('')}}`;
+    allStyles += `.rf{animation:rf ${DURATION}s step-end infinite}`;
+    allStyles += `@keyframes rf{${rightFlashStops.join('')}}`;
+
+    // Flash rectangles covering each half of the screen
+    scoreFlashElements += `<rect class="lf" x="0" y="${AREA_TOP}" width="${WIDTH / 2}" height="${AREA_BOTTOM - AREA_TOP}" fill="${colors.blue}" opacity="0"/>`;
+    scoreFlashElements += `<rect class="rf" x="${WIDTH / 2}" y="${AREA_TOP}" width="${WIDTH / 2}" height="${AREA_BOTTOM - AREA_TOP}" fill="${colors.red}" opacity="0"/>`;
+  }
 
   const content = `
 ${contribBg}
 ${centerLine}
+${scoreFlashElements}
 <text x="${WIDTH / 2 - 30}" y="16" fill="${colors.blue}" font-family="'Courier New',monospace" font-size="14" opacity="0.7">${leftScore}</text>
 <text x="${WIDTH / 2 + 22}" y="16" fill="${colors.red}" font-family="'Courier New',monospace" font-size="14" opacity="0.7">${rightScore}</text>
-<rect class="lp" x="${paddleMargin}" y="0" width="${paddleW}" height="${paddleH}" rx="2" fill="${colors.blue}"/>
-<rect class="rp" x="${rightPaddleX}" y="0" width="${paddleW}" height="${paddleH}" rx="2" fill="${colors.red}"/>
-<circle class="ball" cx="0" cy="0" r="${ballR}" fill="${colors.yellow}"/>`;
+<rect class="lp" x="${PADDLE_MARGIN}" y="0" width="${PADDLE_W}" height="${PADDLE_H}" rx="2" fill="${colors.blue}"/>
+<rect class="rp" x="${RIGHT_PADDLE_X}" y="0" width="${PADDLE_W}" height="${PADDLE_H}" rx="2" fill="${colors.red}"/>
+<circle class="ball-glow" cx="0" cy="0" r="12" fill="url(#pongGlow)" opacity="0.5"/>
+<circle class="ball" cx="0" cy="0" r="${BALL_R}" fill="${colors.yellow}"/>`;
 
-  return svgWrapper('PONG', styles, content);
+  const svg = svgWrapper('PONG', allStyles, content);
+  return svg.replace('<defs>', `<defs>${defs}`);
 }

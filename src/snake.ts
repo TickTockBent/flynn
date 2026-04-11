@@ -147,14 +147,13 @@ export function generateSnake(contrib: ContributionGrid): string {
       if (food) {
         const distToFood = Math.abs(nx - food.x) + Math.abs(ny - food.y);
 
-        if (distToFood <= 8) {
-          // Close to food — pursue, but with occasional detour
-          score -= distToFood * 2;
-          if (Math.random() < 0.15) score += Math.random() * 6; // detour
+        if (distToFood <= 6) {
+          // Close to food — pursue directly
+          score -= distToFood * 3;
         } else {
-          // Far from food — wander organically
-          score -= distToFood * 0.5; // mild pull toward food
-          score += Math.random() * 4; // strong wander
+          // Far from food — head toward food with some organic variation
+          score -= distToFood * 1.5;
+          score += Math.random() * 2; // mild wander for natural-looking paths
         }
       }
 
