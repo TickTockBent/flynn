@@ -1,8 +1,13 @@
 import { ContributionGrid } from './contributions';
 import { WIDTH, HEIGHT, colors, svgWrapper, contribColors, contribGridLayout } from './shared';
 
+const DURATION = 15;
+const MAX_STEPS = 200;
+
+const dx = [1, 0, -1, 0]; // right, down, left, up
+const dy = [0, 1, 0, -1];
+
 export function generateSnake(contrib: ContributionGrid): string {
-  const duration = 15;
   const layout = contribGridLayout(contrib);
   const { cellSize, gap, offsetX, offsetY } = layout;
   const step = cellSize + gap;
@@ -11,7 +16,8 @@ export function generateSnake(contrib: ContributionGrid): string {
 
   const key = (x: number, y: number) => `${x},${y}`;
 
-  // Snake state
+  // ── Snake state ────────────────────────────────────────────────────────────
+
   const startX = Math.floor(cols / 6);
   const startY = Math.floor(rows / 2);
   const snakeBody: { x: number; y: number }[] = [
@@ -19,14 +25,13 @@ export function generateSnake(contrib: ContributionGrid): string {
     { x: startX - 1, y: startY },
     { x: startX - 2, y: startY },
   ];
-  let direction = 0; // 0=right,1=down,2=left,3=up
-  const dx = [1, 0, -1, 0];
-  const dy = [0, 1, 0, -1];
+  let direction = 0;
 
   const occupied = new Set<string>();
   for (const seg of snakeBody) occupied.add(key(seg.x, seg.y));
 
-  // Place food on contribution cells (prefer higher levels)
+  // ── Food placement ─────────────────────────────────────────────────────────
+
   function placeFood(): { x: number; y: number } | null {
     const candidates: { x: number; y: number; level: number }[] = [];
     for (let w = 0; w < cols; w++) {
@@ -37,7 +42,6 @@ export function generateSnake(contrib: ContributionGrid): string {
       }
     }
     if (candidates.length === 0) {
-      // Fallback: any empty cell
       for (let w = 0; w < cols; w++) {
         for (let d = 0; d < rows; d++) {
           if (!occupied.has(key(w, d))) candidates.push({ x: w, y: d, level: 0 });
@@ -45,108 +49,144 @@ export function generateSnake(contrib: ContributionGrid): string {
       }
     }
     if (candidates.length === 0) return null;
-    // Weight toward higher contribution levels
     candidates.sort((a, b) => b.level - a.level);
     const topN = Math.min(candidates.length, Math.max(5, Math.floor(candidates.length * 0.2)));
-    const pick = candidates[Math.floor(Math.random() * topN)];
-    return { x: pick.x, y: pick.y };
+    return candidates[Math.floor(Math.random() * topN)];
   }
 
   let food = placeFood();
 
-  // Record grid state per step: for each cell, list of [enterStep, exitStep]
-  const cellOccupancy = new Map<string, [number, number][]>();
+  // ── Cell occupancy tracking (for body gradient) ────────────────────────────
 
-  function markEnter(x: number, y: number, stepNum: number) {
+  interface CellEvent { enter: number; exit: number; enterAge: number }
+  const cellOccupancy = new Map<string, CellEvent[]>();
+
+  function markEnter(x: number, y: number, stepNum: number, distFromHead: number): void {
     const k = key(x, y);
     if (!cellOccupancy.has(k)) cellOccupancy.set(k, []);
-    cellOccupancy.get(k)!.push([stepNum, -1]);
+    cellOccupancy.get(k)!.push({ enter: stepNum, exit: -1, enterAge: distFromHead });
   }
-  function markExit(x: number, y: number, stepNum: number) {
+
+  function markExit(x: number, y: number, stepNum: number): void {
     const k = key(x, y);
     const intervals = cellOccupancy.get(k);
     if (intervals && intervals.length > 0) {
       const last = intervals[intervals.length - 1];
-      if (last[1] === -1) last[1] = stepNum;
+      if (last.exit === -1) last.exit = stepNum;
     }
   }
 
   // Initialize occupancy for starting body
-  for (const seg of snakeBody) markEnter(seg.x, seg.y, 0);
+  for (let i = 0; i < snakeBody.length; i++) {
+    markEnter(snakeBody[i].x, snakeBody[i].y, 0, i);
+  }
 
-  // Food tracking
-  interface FoodEvent { x: number; y: number; appear: number; eaten: number }
+  // ── Head tracking ──────────────────────────────────────────────────────────
+
+  const headPositions: { x: number; y: number; alive: boolean }[] = [
+    { x: snakeBody[0].x, y: snakeBody[0].y, alive: true },
+  ];
+
+  // ── Food tracking ──────────────────────────────────────────────────────────
+
+  interface FoodEvent { x: number; y: number; appear: number; eaten: number; level: number }
   const foodEvents: FoodEvent[] = [];
-  if (food) foodEvents.push({ x: food.x, y: food.y, appear: 0, eaten: -1 });
+  if (food) {
+    const level = (contrib.grid[food.x] && contrib.grid[food.x][food.y]) || 0;
+    foodEvents.push({ ...food, appear: 0, eaten: -1, level });
+  }
 
-  const maxSteps = 200;
+  // ── Flood fill for trap avoidance ──────────────────────────────────────────
 
-  for (let s = 1; s <= maxSteps; s++) {
-    const head = snakeBody[0];
-    if (!food) {
-      // No food left — restart the snake
-      for (const seg of snakeBody) markExit(seg.x, seg.y, s);
-      snakeBody.length = 0;
-      occupied.clear();
-      const restartX = Math.floor(cols / 6);
-      const restartY = Math.floor(rows / 2);
-      snakeBody.push(
-        { x: restartX, y: restartY },
-        { x: restartX - 1, y: restartY },
-        { x: restartX - 2, y: restartY },
-      );
-      direction = 0;
-      for (const seg of snakeBody) {
-        occupied.add(key(seg.x, seg.y));
-        markEnter(seg.x, seg.y, s);
+  function floodFillCount(startX: number, startY: number): number {
+    const visited = new Set<string>();
+    const queue: { x: number; y: number }[] = [{ x: startX, y: startY }];
+    visited.add(key(startX, startY));
+    let count = 0;
+
+    while (queue.length > 0) {
+      const { x, y } = queue.shift()!;
+      count++;
+      if (count > snakeBody.length + 5) return count; // enough, no need to count more
+
+      for (let d = 0; d < 4; d++) {
+        const nx = x + dx[d], ny = y + dy[d];
+        const k = key(nx, ny);
+        if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && !occupied.has(k) && !visited.has(k)) {
+          visited.add(k);
+          queue.push({ x: nx, y: ny });
+        }
       }
-      food = placeFood();
-      if (food) foodEvents.push({ x: food.x, y: food.y, appear: s, eaten: -1 });
-      continue;
     }
+    return count;
+  }
 
-    // AI: move toward food, avoid walls and self
+  // ── AI ─────────────────────────────────────────────────────────────────────
+
+  function chooseDirection(): number {
+    const head = snakeBody[0];
     const opposite = (direction + 2) % 4;
     let bestDir = -1;
     let bestScore = -Infinity;
 
     for (let d = 0; d < 4; d++) {
       if (d === opposite) continue;
-      const nx = head.x + dx[d];
-      const ny = head.y + dy[d];
+      const nx = head.x + dx[d], ny = head.y + dy[d];
       if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
 
       // Allow moving to tail's current position (it will move away)
       const tail = snakeBody[snakeBody.length - 1];
       if (occupied.has(key(nx, ny)) && !(nx === tail.x && ny === tail.y)) continue;
 
+      // Trap avoidance — flood fill reachable area
+      const reachable = floodFillCount(nx, ny);
+      if (reachable < snakeBody.length) continue; // guaranteed trap
+
       let score = 0;
-      // Distance to food
-      score -= (Math.abs(nx - food.x) + Math.abs(ny - food.y)) * 2;
-      // Prefer current direction
-      if (d === direction) score += 1;
-      // Avoid edges slightly
-      if (nx <= 0 || nx >= cols - 1) score -= 0.5;
-      if (ny <= 0 || ny >= rows - 1) score -= 0.5;
-      // Check open neighbors of destination (avoid trapping self)
+
+      if (food) {
+        const distToFood = Math.abs(nx - food.x) + Math.abs(ny - food.y);
+
+        if (distToFood <= 8) {
+          // Close to food — pursue, but with occasional detour
+          score -= distToFood * 2;
+          if (Math.random() < 0.15) score += Math.random() * 6; // detour
+        } else {
+          // Far from food — wander organically
+          score -= distToFood * 0.5; // mild pull toward food
+          score += Math.random() * 4; // strong wander
+        }
+      }
+
+      // Prefer current direction slightly
+      if (d === direction) score += 0.8;
+
+      // Open neighbors
       let openNeighbors = 0;
       for (let nd = 0; nd < 4; nd++) {
         const nnx = nx + dx[nd], nny = ny + dy[nd];
         if (nnx >= 0 && nnx < cols && nny >= 0 && nny < rows && !occupied.has(key(nnx, nny))) openNeighbors++;
       }
-      score += openNeighbors * 0.5;
+      score += openNeighbors * 1.5;
+
+      // Mild edge avoidance
+      if (nx <= 0 || nx >= cols - 1) score -= 0.5;
+      if (ny <= 0 || ny >= rows - 1) score -= 0.5;
+
+      // Bonus for reachable space (prefer open areas)
+      score += Math.min(reachable, 20) * 0.3;
 
       if (score > bestScore) { bestScore = score; bestDir = d; }
     }
+    return bestDir;
+  }
 
-    if (bestDir === -1) {
-      // Snake is stuck — close occupancy intervals and restart immediately
+  // ── Simulation ─────────────────────────────────────────────────────────────
+
+  for (let s = 1; s <= MAX_STEPS; s++) {
+    if (!food) {
+      // No food left — restart
       for (const seg of snakeBody) markExit(seg.x, seg.y, s);
-      if (foodEvents.length > 0 && foodEvents[foodEvents.length - 1].eaten === -1) {
-        foodEvents[foodEvents.length - 1].eaten = s;
-      }
-
-      // Reset snake to starting position
       snakeBody.length = 0;
       occupied.clear();
       const restartX = Math.floor(cols / 6);
@@ -157,45 +197,88 @@ export function generateSnake(contrib: ContributionGrid): string {
         { x: restartX - 2, y: restartY },
       );
       direction = 0;
-      for (const seg of snakeBody) {
-        occupied.add(key(seg.x, seg.y));
-        markEnter(seg.x, seg.y, s);
+      for (let i = 0; i < snakeBody.length; i++) {
+        occupied.add(key(snakeBody[i].x, snakeBody[i].y));
+        markEnter(snakeBody[i].x, snakeBody[i].y, s, i);
+      }
+      food = placeFood();
+      if (food) {
+        const level = (contrib.grid[food.x] && contrib.grid[food.x][food.y]) || 0;
+        foodEvents.push({ ...food, appear: s, eaten: -1, level });
+      }
+      headPositions.push({ x: restartX, y: restartY, alive: true });
+      continue;
+    }
+
+    const bestDir = chooseDirection();
+
+    if (bestDir === -1) {
+      // Stuck — restart
+      for (const seg of snakeBody) markExit(seg.x, seg.y, s);
+      if (foodEvents.length > 0 && foodEvents[foodEvents.length - 1].eaten === -1) {
+        foodEvents[foodEvents.length - 1].eaten = s;
       }
 
-      // Place fresh food
+      snakeBody.length = 0;
+      occupied.clear();
+      const restartX = Math.floor(cols / 6);
+      const restartY = Math.floor(rows / 2);
+      snakeBody.push(
+        { x: restartX, y: restartY },
+        { x: restartX - 1, y: restartY },
+        { x: restartX - 2, y: restartY },
+      );
+      direction = 0;
+      for (let i = 0; i < snakeBody.length; i++) {
+        occupied.add(key(snakeBody[i].x, snakeBody[i].y));
+        markEnter(snakeBody[i].x, snakeBody[i].y, s, i);
+      }
       food = placeFood();
-      if (food) foodEvents.push({ x: food.x, y: food.y, appear: s, eaten: -1 });
+      if (food) {
+        const level = (contrib.grid[food.x] && contrib.grid[food.x][food.y]) || 0;
+        foodEvents.push({ ...food, appear: s, eaten: -1, level });
+      }
+      headPositions.push({ x: restartX, y: restartY, alive: true });
       continue;
     }
 
     direction = bestDir;
-
-    const newHead = { x: head.x + dx[direction], y: head.y + dy[direction] };
+    const newHead = { x: snakeBody[0].x + dx[direction], y: snakeBody[0].y + dy[direction] };
     snakeBody.unshift(newHead);
     occupied.add(key(newHead.x, newHead.y));
-    markEnter(newHead.x, newHead.y, s);
+    markEnter(newHead.x, newHead.y, s, 0);
 
     if (food && newHead.x === food.x && newHead.y === food.y) {
       // Eat food — don't remove tail (snake grows)
       foodEvents[foodEvents.length - 1].eaten = s;
       food = placeFood();
-      if (food) foodEvents.push({ x: food.x, y: food.y, appear: s, eaten: -1 });
+      if (food) {
+        const level = (contrib.grid[food.x] && contrib.grid[food.x][food.y]) || 0;
+        foodEvents.push({ ...food, appear: s, eaten: -1, level });
+      }
     } else {
       // Remove tail
       const tail = snakeBody.pop()!;
       occupied.delete(key(tail.x, tail.y));
       markExit(tail.x, tail.y, s);
     }
+
+    // Update distances from head for existing body cells
+    // (not tracked per-step — we rely on enter time for the gradient)
+
+    headPositions.push({ x: newHead.x, y: newHead.y, alive: true });
   }
 
-  // Close any open occupancy intervals
+  // Close open occupancy intervals
   for (const [, intervals] of cellOccupancy) {
     for (const interval of intervals) {
-      if (interval[1] === -1) interval[1] = maxSteps;
+      if (interval.exit === -1) interval.exit = MAX_STEPS;
     }
   }
 
-  // Render contribution background (dim)
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  // Contribution background (dim)
   let bgElements = '';
   for (let w = 0; w < cols; w++) {
     for (let d = 0; d < (contrib.grid[w]?.length || 0); d++) {
@@ -217,7 +300,8 @@ export function generateSnake(contrib: ContributionGrid): string {
     }
   }
 
-  // Snake trail elements + styles
+  // ── Body trail keyframes (with gradient) ───────────────────────────────────
+
   let trailElements = '';
   let trailStyles = '';
   let idx = 0;
@@ -227,50 +311,116 @@ export function generateSnake(contrib: ContributionGrid): string {
     const px = offsetX + wx * step;
     const py = offsetY + wy * step;
 
-    // Build visibility keyframes
     const stops: string[] = [];
     const events: { pct: number; opacity: string }[] = [{ pct: 0, opacity: '0' }];
 
-    for (const [enter, exit] of intervals) {
-      const enterPct = (enter / maxSteps) * 100;
-      const exitPct = (exit / maxSteps) * 100;
-      events.push({ pct: enterPct, opacity: '0.8' });
-      events.push({ pct: exitPct, opacity: '0.2' });
+    for (const { enter, exit, enterAge } of intervals) {
+      const enterPct = (enter / MAX_STEPS) * 100;
+      const exitPct = (exit / MAX_STEPS) * 100;
+
+      // Bright when near head (enterAge 0-1), dimmer for body (enterAge 2+)
+      const enterOpacity = enterAge <= 1 ? '0.85' : '0.45';
+      // After a few steps, drop to body opacity
+      const bodyPct = Math.min(enterPct + (3 / MAX_STEPS) * 100, exitPct);
+
+      events.push({ pct: enterPct, opacity: enterOpacity });
+      if (enterAge <= 1 && bodyPct < exitPct) {
+        events.push({ pct: bodyPct, opacity: '0.45' });
+      }
+      // Exit fade
+      const preFadePct = Math.max(enterPct, exitPct - (1 / MAX_STEPS) * 100);
+      if (preFadePct > enterPct && preFadePct < exitPct) {
+        events.push({ pct: preFadePct, opacity: '0.2' });
+      }
+      events.push({ pct: exitPct, opacity: '0' });
     }
     events.push({ pct: 100, opacity: '0' });
-
-    // Deduplicate and sort
     events.sort((a, b) => a.pct - b.pct);
 
     for (const ev of events) {
-      stops.push(`${ev.pct.toFixed(2)}%{opacity:${ev.opacity}}`);
+      stops.push(`${ev.pct.toFixed(1)}%{opacity:${ev.opacity}}`);
     }
 
     trailElements += `<rect class="s${idx}" x="${px.toFixed(1)}" y="${py.toFixed(1)}" width="${cellSize}" height="${cellSize}" rx="2" fill="${colors.green}" opacity="0"/>`;
-    trailStyles += `.s${idx}{animation:s${idx} ${duration}s step-end infinite}`;
+    trailStyles += `.s${idx}{animation:s${idx} ${DURATION}s step-end infinite}`;
     trailStyles += `@keyframes s${idx}{${stops.join('')}}`;
     idx++;
   }
 
-  // Food elements
+  // ── Head element + glow ────────────────────────────────────────────────────
+
+  let headStyles = '';
+  const headStops: string[] = [];
+  const glowStops: string[] = [];
+
+  let prevHeadKey = '';
+  for (let s = 0; s < headPositions.length; s++) {
+    const pos = headPositions[s];
+    const px = offsetX + pos.x * step + cellSize / 2;
+    const py = offsetY + pos.y * step + cellSize / 2;
+    const stateKey = `${Math.round(px)},${Math.round(py)}`;
+
+    if (stateKey !== prevHeadKey || s === 0) {
+      const pct = ((s / MAX_STEPS) * 100).toFixed(1);
+      headStops.push(`${pct}%{transform:translate(${Math.round(px)}px,${Math.round(py)}px)}`);
+      glowStops.push(`${pct}%{transform:translate(${Math.round(px)}px,${Math.round(py)}px)}`);
+      prevHeadKey = stateKey;
+    }
+  }
+  headStops.push('100%{transform:translate(0px,0px);opacity:0}');
+  glowStops.push('100%{opacity:0}');
+
+  headStyles += `.snake-head{animation:sh ${DURATION}s step-end infinite}`;
+  headStyles += `@keyframes sh{${headStops.join('')}}`;
+  headStyles += `.snake-glow{animation:sg ${DURATION}s step-end infinite}`;
+  headStyles += `@keyframes sg{${glowStops.join('')}}`;
+
+  // ── Food elements (with pulse) ─────────────────────────────────────────────
+
   let foodElements = '';
+  let foodStyles = '';
+
+  // Global pulse animation for food
+  foodStyles += `@keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}}`;
+
   for (let i = 0; i < foodEvents.length; i++) {
     const fe = foodEvents[i];
     const px = offsetX + fe.x * step + cellSize / 2;
     const py = offsetY + fe.y * step + cellSize / 2;
-    const appearPct = ((fe.appear / maxSteps) * 100).toFixed(2);
-    const eatPct = fe.eaten >= 0 ? ((fe.eaten / maxSteps) * 100).toFixed(2) : '100';
+    const appearPct = ((fe.appear / MAX_STEPS) * 100).toFixed(1);
+    const eatPct = fe.eaten >= 0 ? ((fe.eaten / MAX_STEPS) * 100).toFixed(1) : '100';
+    const foodColor = fe.level > 0 ? contribColors[fe.level] : colors.red;
 
-    foodElements += `<circle class="f${i}" cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${cellSize / 2 - 1}" fill="${colors.red}" opacity="0"/>`;
-    trailStyles += `.f${i}{animation:f${i} ${duration}s step-end infinite}`;
-    trailStyles += `@keyframes f${i}{0%,${appearPct}%{opacity:0}${appearPct}%,${eatPct}%{opacity:0.9}${eatPct}%,100%{opacity:0}}`;
+    // Wrapper group controls visibility
+    foodStyles += `.fw${i}{animation:fw${i} ${DURATION}s step-end infinite}`;
+    foodStyles += `@keyframes fw${i}{0%,${appearPct}%{opacity:0}${appearPct}%{opacity:1}${eatPct}%{opacity:0}100%{opacity:0}}`;
+
+    foodElements += `<g class="fw${i}" opacity="0">`;
+    foodElements += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${cellSize / 2 - 1}" fill="${foodColor}" style="animation:pulse .8s ease-in-out infinite"/>`;
+    foodElements += `</g>`;
   }
 
+  // ── SVG defs ───────────────────────────────────────────────────────────────
+
+  const defs = `
+  <radialGradient id="snakeGlow">
+    <stop offset="0%" stop-color="${colors.cyan}" stop-opacity="0.5"/>
+    <stop offset="100%" stop-color="${colors.cyan}" stop-opacity="0"/>
+  </radialGradient>`;
+
+  // ── Assemble ───────────────────────────────────────────────────────────────
+
+  const allStyles = trailStyles + headStyles + foodStyles;
+
+  const half = cellSize / 2;
   const content = `
 ${gridDots}
 ${bgElements}
 ${trailElements}
-${foodElements}`;
+${foodElements}
+<circle class="snake-glow" cx="0" cy="0" r="${cellSize * 1.5}" fill="url(#snakeGlow)" opacity="0.6"/>
+<rect class="snake-head" x="${-half}" y="${-half}" width="${cellSize}" height="${cellSize}" rx="2" fill="${colors.cyan}" opacity="0"/>`;
 
-  return svgWrapper('SNAKE', trailStyles, content);
+  const svg = svgWrapper('SNAKE', allStyles, content);
+  return svg.replace('<defs>', `<defs>${defs}`);
 }
