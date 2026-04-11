@@ -7,11 +7,16 @@ import { generateLife } from '../src/life';
 import { generateTron } from '../src/tron';
 
 const games: Record<string, (c: ContributionGrid) => string> = {
-  pong: generatePong,
   breakout: generateBreakout,
   snake: generateSnake,
   life: generateLife,
   tron: generateTron,
+};
+
+// Pong is still accessible via ?game=pong but excluded from random rotation
+const allGames: Record<string, (c: ContributionGrid) => string> = {
+  ...games,
+  pong: generatePong,
 };
 
 const gameNames = Object.keys(games);
@@ -24,13 +29,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const requestedGame = typeof req.query.game === 'string' ? req.query.game : undefined;
   let gameName: string;
-  if (requestedGame && games[requestedGame]) {
+  if (requestedGame && allGames[requestedGame]) {
     gameName = requestedGame;
   } else {
     gameName = gameNames[Math.floor(Math.random() * gameNames.length)];
   }
 
-  const svg = games[gameName](contributions);
+  const svg = allGames[gameName](contributions);
 
   res.setHeader('Content-Type', 'image/svg+xml');
   res.setHeader('Cache-Control', 'max-age=0, no-cache, no-store, must-revalidate');
