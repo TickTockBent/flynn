@@ -1,45 +1,68 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { fetchContributions, ContributionGrid } from '../src/contributions';
+import { GameContext, ThemeName, createRng, themes } from '../src/shared';
 import { generatePong } from '../src/pong';
 import { generateBreakout } from '../src/breakout';
 import { generateSnake } from '../src/snake';
 import { generateLife } from '../src/life';
 import { generateTron } from '../src/tron';
+import { generateInvaders } from '../src/invaders';
 
-const games: Record<string, (c: ContributionGrid) => string> = {
+type Generator = (contrib: ContributionGrid, ctx: GameContext) => string;
+
+const rotation: Record<string, Generator> = {
+  invaders: generateInvaders,
   breakout: generateBreakout,
   snake: generateSnake,
   life: generateLife,
   tron: generateTron,
 };
 
-// Pong is still accessible via ?game=pong but excluded from random rotation
-const allGames: Record<string, (c: ContributionGrid) => string> = {
-  ...games,
+// Pong is still accessible via ?game=pong but excluded from the daily rotation
+const allGames: Record<string, Generator> = {
+  ...rotation,
   pong: generatePong,
 };
 
-const gameNames = Object.keys(games);
+const rotationNames = Object.keys(rotation);
+
+const USERNAME_PATTERN = /^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$/;
+
+function queryString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const username = (typeof req.query.username === 'string' ? req.query.username : '') || 'TickTockBent';
+  const requestedUsername = queryString(req.query.username);
+  const username = USERNAME_PATTERN.test(requestedUsername) ? requestedUsername : 'TickTockBent';
   const token = process.env.PAT_1 || '';
 
-  const contributions = await fetchContributions(username, token);
+  const themeName: ThemeName = queryString(req.query.theme) === 'light' ? 'light' : 'dark';
 
-  const requestedGame = typeof req.query.game === 'string' ? req.query.game : undefined;
-  let gameName: string;
-  if (requestedGame && allGames[requestedGame]) {
-    gameName = requestedGame;
-  } else {
-    gameName = gameNames[Math.floor(Math.random() * gameNames.length)];
-  }
+  // Deterministic "game of the day": same seed (and thus the same game and
+  // playthrough) all day, a fresh one tomorrow. ?seed= overrides for variety.
+  const daySeed = new Date().toISOString().slice(0, 10);
+  const seed = queryString(req.query.seed) || daySeed;
 
-  const svg = allGames[gameName](contributions);
+  const requestedGame = queryString(req.query.game);
+  const gameName = allGames[requestedGame]
+    ? requestedGame
+    : rotationNames[Math.floor(createRng(`pick:${username}:${seed}`)() * rotationNames.length)];
+
+  const contributions = await fetchContributions(username, token, createRng(`fallback:${seed}`));
+
+  const ctx: GameContext = {
+    theme: themes[themeName],
+    rng: createRng(`${gameName}:${username}:${seed}`),
+    username,
+    totalContributions: contributions.total,
+  };
+
+  const svg = allGames[gameName](contributions, ctx);
 
   res.setHeader('Content-Type', 'image/svg+xml');
-  res.setHeader('Cache-Control', 'max-age=0, no-cache, no-store, must-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
+  // Output is deterministic within a day, so let GitHub's camo proxy cache it
+  // for a while instead of hammering the GraphQL API on every profile view
+  res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=3600');
   res.status(200).send(svg);
 }

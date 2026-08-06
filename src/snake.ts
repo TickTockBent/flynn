@@ -1,5 +1,5 @@
 import { ContributionGrid } from './contributions';
-import { WIDTH, HEIGHT, colors, svgWrapper, contribColors, contribGridLayout } from './shared';
+import { GameContext, svgWrapper, contribGridLayout } from './shared';
 
 const DURATION = 15;
 const MAX_STEPS = 200;
@@ -7,7 +7,8 @@ const MAX_STEPS = 200;
 const dx = [1, 0, -1, 0]; // right, down, left, up
 const dy = [0, 1, 0, -1];
 
-export function generateSnake(contrib: ContributionGrid): string {
+export function generateSnake(contrib: ContributionGrid, ctx: GameContext): string {
+  const { theme, rng } = ctx;
   const layout = contribGridLayout(contrib);
   const { cellSize, gap, offsetX, offsetY } = layout;
   const step = cellSize + gap;
@@ -51,7 +52,7 @@ export function generateSnake(contrib: ContributionGrid): string {
     if (candidates.length === 0) return null;
     candidates.sort((a, b) => b.level - a.level);
     const topN = Math.min(candidates.length, Math.max(5, Math.floor(candidates.length * 0.2)));
-    return candidates[Math.floor(Math.random() * topN)];
+    return candidates[Math.floor(rng() * topN)];
   }
 
   let food = placeFood();
@@ -156,7 +157,7 @@ export function generateSnake(contrib: ContributionGrid): string {
         // Food is the primary objective — score dominates other factors
         score -= distToFood * 10;
         // Mild organic variation only when far
-        if (distToFood > 10) score += Math.random() * 3;
+        if (distToFood > 10) score += rng() * 3;
       }
 
       // Secondary factors — kept small so food always wins
@@ -276,7 +277,7 @@ export function generateSnake(contrib: ContributionGrid): string {
       if (level === 0) continue;
       const px = offsetX + w * step;
       const py = offsetY + d * step;
-      bgElements += `<rect x="${px.toFixed(1)}" y="${py.toFixed(1)}" width="${cellSize}" height="${cellSize}" rx="2" fill="${contribColors[level]}" opacity="0.15"/>`;
+      bgElements += `<rect x="${px.toFixed(1)}" y="${py.toFixed(1)}" width="${cellSize}" height="${cellSize}" rx="2" fill="${theme.contrib[level]}" opacity="0.15"/>`;
     }
   }
 
@@ -286,7 +287,7 @@ export function generateSnake(contrib: ContributionGrid): string {
     for (let d = 0; d < rows; d++) {
       const px = offsetX + w * step + cellSize / 2;
       const py = offsetY + d * step + cellSize / 2;
-      gridDots += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="0.8" fill="${colors.dimmed}" opacity="0.1"/>`;
+      gridDots += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="0.8" fill="${theme.dimmed}" opacity="0.1"/>`;
     }
   }
 
@@ -331,7 +332,7 @@ export function generateSnake(contrib: ContributionGrid): string {
       stops.push(`${ev.pct.toFixed(1)}%{opacity:${ev.opacity}}`);
     }
 
-    trailElements += `<rect class="s${idx}" x="${px.toFixed(1)}" y="${py.toFixed(1)}" width="${cellSize}" height="${cellSize}" rx="2" fill="${colors.green}" opacity="0"/>`;
+    trailElements += `<rect class="s${idx}" x="${px.toFixed(1)}" y="${py.toFixed(1)}" width="${cellSize}" height="${cellSize}" rx="2" fill="${theme.green}" opacity="0"/>`;
     trailStyles += `.s${idx}{animation:s${idx} ${DURATION}s step-end infinite}`;
     trailStyles += `@keyframes s${idx}{${stops.join('')}}`;
     idx++;
@@ -379,7 +380,7 @@ export function generateSnake(contrib: ContributionGrid): string {
     const py = offsetY + fe.y * step + cellSize / 2;
     const appearPct = ((fe.appear / MAX_STEPS) * 100).toFixed(1);
     const eatPct = fe.eaten >= 0 ? ((fe.eaten / MAX_STEPS) * 100).toFixed(1) : '100';
-    const foodColor = fe.level > 0 ? contribColors[fe.level] : colors.red;
+    const foodColor = fe.level > 0 ? theme.contrib[fe.level] : theme.red;
 
     // Wrapper group controls visibility
     foodStyles += `.fw${i}{animation:fw${i} ${DURATION}s step-end infinite}`;
@@ -394,8 +395,8 @@ export function generateSnake(contrib: ContributionGrid): string {
 
   const defs = `
   <radialGradient id="snakeGlow">
-    <stop offset="0%" stop-color="${colors.cyan}" stop-opacity="0.5"/>
-    <stop offset="100%" stop-color="${colors.cyan}" stop-opacity="0"/>
+    <stop offset="0%" stop-color="${theme.cyan}" stop-opacity="0.5"/>
+    <stop offset="100%" stop-color="${theme.cyan}" stop-opacity="0"/>
   </radialGradient>`;
 
   // ── Assemble ───────────────────────────────────────────────────────────────
@@ -409,8 +410,8 @@ ${bgElements}
 ${trailElements}
 ${foodElements}
 <circle class="snake-glow" cx="0" cy="0" r="${cellSize * 1.5}" fill="url(#snakeGlow)" opacity="0.6"/>
-<rect class="snake-head" x="${-half}" y="${-half}" width="${cellSize}" height="${cellSize}" rx="2" fill="${colors.cyan}" opacity="0"/>`;
+<rect class="snake-head" x="${-half}" y="${-half}" width="${cellSize}" height="${cellSize}" rx="2" fill="${theme.cyan}" opacity="0"/>`;
 
-  const svg = svgWrapper('SNAKE', allStyles, content);
+  const svg = svgWrapper(ctx, 'SNAKE', allStyles, content);
   return svg.replace('<defs>', `<defs>${defs}`);
 }

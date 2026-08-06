@@ -11,6 +11,6 @@
     "rootDir": ".",
     "baseUrl": "."
   },
-  "include": ["api/**/*.ts", "src/**/*.ts"],
+  "include": ["api/**/*.ts", "src/**/*.ts", "scripts/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

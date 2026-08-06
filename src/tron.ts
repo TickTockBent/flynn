@@ -1,5 +1,5 @@
 import { ContributionGrid } from './contributions';
-import { WIDTH, HEIGHT, colors, svgWrapper, contribColors, contribGridLayout } from './shared';
+import { GameContext, svgWrapper, contribGridLayout } from './shared';
 
 const DURATION = 10;
 const MAX_STEPS = 200;
@@ -10,10 +10,10 @@ const dx = [1, 0, -1, 0]; // right, down, left, up
 const dy = [0, 1, 0, -1];
 const dirAngles = [0, 90, 180, 270];
 
-const cycleColors = [colors.blue, colors.orange];
-const glowColors = [colors.cyan, colors.yellow];
-
-export function generateTron(contrib: ContributionGrid): string {
+export function generateTron(contrib: ContributionGrid, ctx: GameContext): string {
+  const { theme, rng } = ctx;
+  const cycleColors = [theme.blue, theme.orange];
+  const glowColors = [theme.cyan, theme.yellow];
   const layout = contribGridLayout(contrib);
   const { cellSize, gap, offsetX, offsetY } = layout;
   const step = cellSize + gap;
@@ -64,8 +64,8 @@ export function generateTron(contrib: ContributionGrid): string {
 
   function randomStart(colMin: number, colMax: number, dir: number): Cycle & { id: number } {
     return {
-      x: colMin + Math.floor(Math.random() * (colMax - colMin)),
-      y: 1 + Math.floor(Math.random() * (rows - 2)),
+      x: colMin + Math.floor(rng() * (colMax - colMin)),
+      y: 1 + Math.floor(rng() * (rows - 2)),
       dir,
       alive: true,
       id: 0,
@@ -78,11 +78,11 @@ export function generateTron(contrib: ContributionGrid): string {
     ownTrail[1].clear();
 
     const blue: Cycle = {
-      ...randomStart(5, 15, Math.random() < 0.5 ? 0 : Math.floor(Math.random() * 4)),
+      ...randomStart(5, 15, rng() < 0.5 ? 0 : Math.floor(rng() * 4)),
       id: 0,
     };
     const orange: Cycle = {
-      ...randomStart(37, 47, Math.random() < 0.5 ? 2 : Math.floor(Math.random() * 4)),
+      ...randomStart(37, 47, rng() < 0.5 ? 2 : Math.floor(rng() * 4)),
       id: 1,
     };
 
@@ -132,7 +132,7 @@ export function generateTron(contrib: ContributionGrid): string {
       score -= (Math.abs(nx - cols / 2) / cols + Math.abs(ny - rows / 2) / rows) * 0.5;
 
       // High random factor
-      score += Math.random() * 2.5;
+      score += rng() * 2.5;
 
       if (score > bestScore) { bestScore = score; bestDir = d; }
     }
@@ -199,7 +199,7 @@ export function generateTron(contrib: ContributionGrid): string {
       }
 
       // Low random factor
-      score += Math.random() * 0.5;
+      score += rng() * 0.5;
 
       if (score > bestScore) { bestScore = score; bestDir = d; }
     }
@@ -300,11 +300,11 @@ export function generateTron(contrib: ContributionGrid): string {
   let gridLines = '';
   for (let w = 0; w <= cols; w++) {
     const lx = offsetX + w * step - gap / 2;
-    gridLines += `<line x1="${lx}" y1="${offsetY}" x2="${lx}" y2="${offsetY + rows * step - gap}" stroke="${colors.cyan}" stroke-width="0.5" opacity="0.04"/>`;
+    gridLines += `<line x1="${lx}" y1="${offsetY}" x2="${lx}" y2="${offsetY + rows * step - gap}" stroke="${theme.cyan}" stroke-width="0.5" opacity="0.04"/>`;
   }
   for (let d = 0; d <= rows; d++) {
     const ly = offsetY + d * step - gap / 2;
-    gridLines += `<line x1="${offsetX}" y1="${ly}" x2="${offsetX + cols * step - gap}" y2="${ly}" stroke="${colors.cyan}" stroke-width="0.5" opacity="0.04"/>`;
+    gridLines += `<line x1="${offsetX}" y1="${ly}" x2="${offsetX + cols * step - gap}" y2="${ly}" stroke="${theme.cyan}" stroke-width="0.5" opacity="0.04"/>`;
   }
 
   // Contribution background (very dim)
@@ -315,7 +315,7 @@ export function generateTron(contrib: ContributionGrid): string {
       if (level === 0) continue;
       const px = offsetX + w * step;
       const py = offsetY + d * step;
-      bgElements += `<rect x="${px.toFixed(1)}" y="${py.toFixed(1)}" width="${cellSize}" height="${cellSize}" rx="2" fill="${contribColors[level]}" opacity="0.10"/>`;
+      bgElements += `<rect x="${px.toFixed(1)}" y="${py.toFixed(1)}" width="${cellSize}" height="${cellSize}" rx="2" fill="${theme.contrib[level]}" opacity="0.10"/>`;
     }
   }
 
@@ -427,12 +427,12 @@ export function generateTron(contrib: ContributionGrid): string {
 
   const defs = `
   <radialGradient id="halo0">
-    <stop offset="0%" stop-color="${colors.cyan}" stop-opacity="0.5"/>
-    <stop offset="100%" stop-color="${colors.cyan}" stop-opacity="0"/>
+    <stop offset="0%" stop-color="${theme.cyan}" stop-opacity="0.5"/>
+    <stop offset="100%" stop-color="${theme.cyan}" stop-opacity="0"/>
   </radialGradient>
   <radialGradient id="halo1">
-    <stop offset="0%" stop-color="${colors.yellow}" stop-opacity="0.5"/>
-    <stop offset="100%" stop-color="${colors.yellow}" stop-opacity="0"/>
+    <stop offset="0%" stop-color="${theme.yellow}" stop-opacity="0.5"/>
+    <stop offset="100%" stop-color="${theme.yellow}" stop-opacity="0"/>
   </radialGradient>`;
 
   // ── Assemble ───────────────────────────────────────────────────────────────
@@ -445,6 +445,6 @@ ${bgElements}
 ${trailElements}
 ${headElements}`;
 
-  const svg = svgWrapper('TRON', allStyles, content);
+  const svg = svgWrapper(ctx, 'TRON', allStyles, content);
   return svg.replace('<defs>', `<defs>${defs}`);
 }

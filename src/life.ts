@@ -1,18 +1,18 @@
 import { ContributionGrid } from './contributions';
-import { WIDTH, HEIGHT, colors, svgWrapper, contribColors, contribGridLayout } from './shared';
+import { WIDTH, GameContext, svgWrapper, contribGridLayout } from './shared';
 
 const DURATION = 15;
 const GENERATIONS = 60;
-
-// Conway-born cell colors — colorful life blooming from green contribution substrate
-const conwayColors = [colors.cyan, colors.blue, colors.magenta];
 
 // Classic GoL patterns to inject for guaranteed interesting behavior
 const GLIDER = [[0,1,0],[0,0,1],[1,1,1]];
 const R_PENTOMINO = [[0,1,1],[1,1,0],[0,1,0]];
 const BLINKER = [[1,1,1]];
 
-export function generateLife(contrib: ContributionGrid): string {
+export function generateLife(contrib: ContributionGrid, ctx: GameContext): string {
+  const { theme, rng } = ctx;
+  // Conway-born cell colors — colorful life blooming from green contribution substrate
+  const conwayColors = [theme.cyan, theme.blue, theme.magenta];
   const layout = contribGridLayout(contrib);
   const { cellSize, gap, offsetX, offsetY } = layout;
   const step = cellSize + gap;
@@ -54,8 +54,8 @@ export function generateLife(contrib: ContributionGrid): string {
   }
 
   // Inject 2 gliders at random-ish positions in open areas
-  const glider1Col = 3 + Math.floor(Math.random() * 8);
-  const glider2Col = cols - 12 + Math.floor(Math.random() * 8);
+  const glider1Col = 3 + Math.floor(rng() * 8);
+  const glider2Col = cols - 12 + Math.floor(rng() * 8);
   injectPattern(GLIDER, glider1Col, 0);
   injectPattern(GLIDER, glider2Col, rows - 4);
 
@@ -122,7 +122,7 @@ export function generateLife(contrib: ContributionGrid): string {
     const origin = cellOrigin[r][c];
     if (origin === 'contrib') {
       const level = initialLevel[r][c];
-      return level > 0 ? contribColors[level] : contribColors[1];
+      return level > 0 ? theme.contrib[level] : theme.contrib[1];
     }
     // Conway-born: colorful based on position
     return conwayColors[(r + c) % conwayColors.length];
@@ -195,9 +195,9 @@ export function generateLife(contrib: ContributionGrid): string {
   // Find the 3 densest column ranges (windows of 8 columns)
   const defs = `
   <radialGradient id="lifeGlow">
-    <stop offset="0%" stop-color="${colors.cyan}" stop-opacity="0.25"/>
-    <stop offset="70%" stop-color="${colors.blue}" stop-opacity="0.08"/>
-    <stop offset="100%" stop-color="${colors.blue}" stop-opacity="0"/>
+    <stop offset="0%" stop-color="${theme.cyan}" stop-opacity="0.25"/>
+    <stop offset="70%" stop-color="${theme.blue}" stop-opacity="0.08"/>
+    <stop offset="100%" stop-color="${theme.blue}" stop-opacity="0"/>
   </radialGradient>`;
 
   let glowElements = '';
@@ -236,7 +236,7 @@ export function generateLife(contrib: ContributionGrid): string {
 
     genStyles += `.${cls}{animation:${cls} ${DURATION}s step-end infinite}`;
     genStyles += `@keyframes ${cls}{0%,${showStart}%{opacity:0}${showStart}%{opacity:0.4}${showEnd}%{opacity:0}100%{opacity:0}}`;
-    genElements += `<text class="${cls}" x="${WIDTH - 60}" y="14" fill="${colors.dimmed}" font-family="'Courier New',monospace" font-size="9" opacity="0">gen ${genNum}</text>`;
+    genElements += `<text class="${cls}" x="${WIDTH - 130}" y="14" fill="${theme.dimmed}" font-family="'Courier New',monospace" font-size="9" text-anchor="end" opacity="0">gen ${genNum}</text>`;
   }
 
   // ── Grid dots (subtle) ─────────────────────────────────────────────────────
@@ -246,7 +246,7 @@ export function generateLife(contrib: ContributionGrid): string {
     for (let c = 0; c < cols; c++) {
       const px = offsetX + c * step + cellSize / 2;
       const py = offsetY + r * step + cellSize / 2;
-      gridDots += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="0.6" fill="${colors.dimmed}" opacity="0.08"/>`;
+      gridDots += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="0.6" fill="${theme.dimmed}" opacity="0.08"/>`;
     }
   }
 
@@ -260,6 +260,6 @@ ${glowElements}
 ${cellElements}
 ${genElements}`;
 
-  const svg = svgWrapper('GAME OF LIFE', allStyles, content);
+  const svg = svgWrapper(ctx, 'GAME OF LIFE', allStyles, content);
   return svg.replace('<defs>', `<defs>${defs}`);
 }

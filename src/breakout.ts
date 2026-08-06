@@ -1,5 +1,7 @@
 import { ContributionGrid } from './contributions';
-import { WIDTH, HEIGHT, colors, svgWrapper, rand, clamp, contribColors } from './shared';
+import { WIDTH, HEIGHT, GameContext, svgWrapper, clamp } from './shared';
+
+type RandomIn = (min: number, max: number) => number;
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -67,10 +69,10 @@ interface PaddleAI {
   rallyCount: number;
 }
 
-function initPaddleAI(): PaddleAI {
+function initPaddleAI(randomIn: RandomIn): PaddleAI {
   return {
-    predictionError: rand(-12, 12),
-    reactionDelay: Math.floor(rand(2, 4)),
+    predictionError: randomIn(-12, 12),
+    reactionDelay: Math.floor(randomIn(2, 4)),
     reactionCountdown: 0,
     lastPrediction: WIDTH / 2,
     lastBallVy: -1,
@@ -80,7 +82,8 @@ function initPaddleAI(): PaddleAI {
 
 function updatePaddleAI(
   ai: PaddleAI, paddleX: number,
-  bx: number, by: number, vx: number, vy: number
+  bx: number, by: number, vx: number, vy: number,
+  randomIn: RandomIn
 ): number {
   const center = WIDTH / 2 - PADDLE_W / 2;
 
@@ -90,8 +93,8 @@ function updatePaddleAI(
   }
 
   if (ai.lastBallVy <= 0 && vy > 0) {
-    ai.reactionCountdown = Math.floor(rand(1, 3));
-    ai.predictionError = rand(-10, 10);
+    ai.reactionCountdown = Math.floor(randomIn(1, 3));
+    ai.predictionError = randomIn(-10, 10);
   }
   ai.lastBallVy = vy;
 
@@ -108,16 +111,16 @@ function updatePaddleAI(
   return clamp(paddleX + clamp(diff, -PADDLE_MAX_SPEED, PADDLE_MAX_SPEED), MARGIN, WIDTH - MARGIN - PADDLE_W);
 }
 
-function resetPaddleAIForRally(ai: PaddleAI): void {
-  ai.predictionError = rand(-10, 10);
+function resetPaddleAIForRally(ai: PaddleAI, randomIn: RandomIn): void {
+  ai.predictionError = randomIn(-10, 10);
   ai.reactionCountdown = ai.reactionDelay;
   ai.lastBallVy = -1;
   ai.rallyCount++;
 }
 
-function resetPaddleAIForLifeLost(ai: PaddleAI): void {
-  ai.predictionError = rand(-8, 8);
-  ai.reactionDelay = Math.floor(rand(2, 4));
+function resetPaddleAIForLifeLost(ai: PaddleAI, randomIn: RandomIn): void {
+  ai.predictionError = randomIn(-8, 8);
+  ai.reactionDelay = Math.floor(randomIn(2, 4));
   ai.reactionCountdown = 0;
   ai.lastBallVy = -1;
   ai.rallyCount = 0;
@@ -125,7 +128,9 @@ function resetPaddleAIForLifeLost(ai: PaddleAI): void {
 
 // ── Main Generator ─────────────────────────────────────────────────────────────
 
-export function generateBreakout(contrib: ContributionGrid): string {
+export function generateBreakout(contrib: ContributionGrid, ctx: GameContext): string {
+  const { theme, rng } = ctx;
+  const randomIn: RandomIn = (min, max) => min + rng() * (max - min);
   const brickW = Math.floor((WIDTH - 2 * MARGIN - (contrib.weeks - 1) * BRICK_GAP) / contrib.weeks);
   const brickH = 11;
   const brickOffsetX = Math.floor((WIDTH - contrib.weeks * (brickW + BRICK_GAP) + BRICK_GAP) / 2);
@@ -145,7 +150,7 @@ export function generateBreakout(contrib: ContributionGrid): string {
         y: BRICK_TOP + d * (brickH + BRICK_GAP),
         w: brickW, h: brickH,
         alive: true, destroyFrame: -1,
-        color: contribColors[level],
+        color: theme.contrib[level],
         index: brickIndex++,
       };
       bricks.push(brick);
@@ -166,7 +171,7 @@ export function generateBreakout(contrib: ContributionGrid): string {
   // ── Ball state ─────────────────────────────────────────────────────────────
   let speed = INITIAL_SPEED;
   let bx = WIDTH / 2, by = PADDLE_Y - 20;
-  let vx = rand(3, 5) * (Math.random() > 0.5 ? 1 : -1);
+  let vx = randomIn(3, 5) * (rng() > 0.5 ? 1 : -1);
   let vy = -speed * 0.8;
 
   function normVel(): void {
@@ -181,7 +186,7 @@ export function generateBreakout(contrib: ContributionGrid): string {
   normVel();
 
   let paddleX = WIDTH / 2 - PADDLE_W / 2;
-  const paddleAI = initPaddleAI();
+  const paddleAI = initPaddleAI(randomIn);
   const paddleHitFrames: number[] = [];
   let ballVisible = true;
 
@@ -207,7 +212,7 @@ export function generateBreakout(contrib: ContributionGrid): string {
       for (let d = 0; d < BRICK_ROWS; d++) {
         const neighbor = brickGrid[nw]?.[d];
         if (!neighbor || !neighbor.alive) continue;
-        if (Math.random() < chance) {
+        if (rng() < chance) {
           neighbor.alive = false;
           neighbor.destroyFrame = f + dist;
           bricksRemaining--;
@@ -238,23 +243,23 @@ export function generateBreakout(contrib: ContributionGrid): string {
       if (respawnTimer <= 0) {
         state = 'playing';
         speed = Math.max(INITIAL_SPEED, speed * 0.9);
-        vx = rand(3, 5) * (Math.random() > 0.5 ? 1 : -1);
+        vx = randomIn(3, 5) * (rng() > 0.5 ? 1 : -1);
         vy = -speed * 0.8;
         normVel();
         ballVisible = true;
-        resetPaddleAIForLifeLost(paddleAI);
+        resetPaddleAIForLifeLost(paddleAI, randomIn);
       }
     } else {
       // ── PLAYING ──────────────────────────────────────────────────────────
-      paddleX = updatePaddleAI(paddleAI, paddleX, bx, by, vx, vy);
+      paddleX = updatePaddleAI(paddleAI, paddleX, bx, by, vx, vy, randomIn);
 
       const prevBx = bx, prevBy = by;
       bx += vx; by += vy;
 
       // Walls — slight angle perturbation on bounce to vary trajectory
-      if (bx - BALL_R <= MARGIN) { bx = MARGIN + BALL_R; vx = Math.abs(vx); vy += rand(-0.5, 0.5); normVel(); }
-      if (bx + BALL_R >= WIDTH - MARGIN) { bx = WIDTH - MARGIN - BALL_R; vx = -Math.abs(vx); vy += rand(-0.5, 0.5); normVel(); }
-      if (by - BALL_R <= AREA_TOP) { by = AREA_TOP + BALL_R; vy = Math.abs(vy); vx += rand(-0.5, 0.5); normVel(); }
+      if (bx - BALL_R <= MARGIN) { bx = MARGIN + BALL_R; vx = Math.abs(vx); vy += randomIn(-0.5, 0.5); normVel(); }
+      if (bx + BALL_R >= WIDTH - MARGIN) { bx = WIDTH - MARGIN - BALL_R; vx = -Math.abs(vx); vy += randomIn(-0.5, 0.5); normVel(); }
+      if (by - BALL_R <= AREA_TOP) { by = AREA_TOP + BALL_R; vy = Math.abs(vy); vx += randomIn(-0.5, 0.5); normVel(); }
 
       // Brick destruction — column-based pierce
       if (by - BALL_R <= brickBottomY && by + BALL_R >= BRICK_TOP) {
@@ -278,12 +283,12 @@ export function generateBreakout(contrib: ContributionGrid): string {
         by = PADDLE_Y - BALL_R;
         const hitOffset = clamp((bx - paddleX - PADDLE_W / 2) / (PADDLE_W / 2), -1, 1);
         // Add random jitter to break periodic trajectories
-        const jitter = rand(-0.3, 0.3);
+        const jitter = randomIn(-0.3, 0.3);
         const angle = clamp(hitOffset + jitter, -1, 1) * 65 * (Math.PI / 180);
         vx = speed * Math.sin(angle);
         vy = -speed * Math.cos(angle);
         paddleHitFrames.push(f);
-        resetPaddleAIForRally(paddleAI);
+        resetPaddleAIForRally(paddleAI, randomIn);
       }
 
       // Ball lost
@@ -324,8 +329,8 @@ export function generateBreakout(contrib: ContributionGrid): string {
 
   const defs = `
   <radialGradient id="ballGlow">
-    <stop offset="0%" stop-color="${colors.cyan}" stop-opacity="0.6"/>
-    <stop offset="100%" stop-color="${colors.cyan}" stop-opacity="0"/>
+    <stop offset="0%" stop-color="${theme.cyan}" stop-opacity="0.6"/>
+    <stop offset="100%" stop-color="${theme.cyan}" stop-opacity="0"/>
   </radialGradient>`;
 
   // Ball
@@ -376,7 +381,7 @@ export function generateBreakout(contrib: ContributionGrid): string {
     } else {
       allStyles += `.life${i}{opacity:0.9}`;
     }
-    lifeElements += `<circle class="life${i}" cx="${cx}" cy="12" r="4" fill="${colors.red}"/>`;
+    lifeElements += `<circle class="life${i}" cx="${cx}" cy="12" r="4" fill="${theme.red}"/>`;
   }
 
   // Progress bar
@@ -407,19 +412,19 @@ export function generateBreakout(contrib: ContributionGrid): string {
 
   // Content assembly
   allContent += brickElements;
-  allContent += `<rect class="prog" x="${progBarX}" y="${progBarY}" width="${progBarW}" height="${progBarH}" rx="2" fill="${colors.green}" opacity="0.6"/>`;
+  allContent += `<rect class="prog" x="${progBarX}" y="${progBarY}" width="${progBarW}" height="${progBarH}" rx="2" fill="${theme.green}" opacity="0.6"/>`;
   allContent += lifeElements;
-  allContent += `<rect class="pad" x="0" y="${PADDLE_Y}" width="${PADDLE_W}" height="${PADDLE_H}" rx="3" fill="${colors.cyan}"/>`;
+  allContent += `<rect class="pad" x="0" y="${PADDLE_Y}" width="${PADDLE_W}" height="${PADDLE_H}" rx="3" fill="${theme.cyan}"/>`;
   if (paddleHitFrames.length > 0) {
     allContent += `<rect class="pad-flash pad" x="0" y="${PADDLE_Y}" width="${PADDLE_W}" height="${PADDLE_H}" rx="3" fill="white" opacity="0"/>`;
   }
   allContent += `<circle class="ball-glow" cx="0" cy="0" r="10" fill="url(#ballGlow)" opacity="0.5"/>`;
-  allContent += `<circle class="ball" cx="0" cy="0" r="${BALL_R}" fill="${colors.fg}"/>`;
+  allContent += `<circle class="ball" cx="0" cy="0" r="${BALL_R}" fill="${theme.fg}"/>`;
 
   const textY = Math.floor((PADDLE_Y + brickBottomY) / 2) + 4;
-  allContent += `<text class="win-text" x="${WIDTH / 2}" y="${textY}" fill="${colors.green}" font-family="'Courier New',monospace" font-size="20" font-weight="bold" text-anchor="middle" opacity="0">YOU WIN!</text>`;
-  allContent += `<text class="lose-text" x="${WIDTH / 2}" y="${textY}" fill="${colors.red}" font-family="'Courier New',monospace" font-size="20" font-weight="bold" text-anchor="middle" opacity="0">GAME OVER</text>`;
+  allContent += `<text class="win-text" x="${WIDTH / 2}" y="${textY}" fill="${theme.green}" font-family="'Courier New',monospace" font-size="20" font-weight="bold" text-anchor="middle" opacity="0">YOU WIN!</text>`;
+  allContent += `<text class="lose-text" x="${WIDTH / 2}" y="${textY}" fill="${theme.red}" font-family="'Courier New',monospace" font-size="20" font-weight="bold" text-anchor="middle" opacity="0">GAME OVER</text>`;
 
-  const svg = svgWrapper('BREAKOUT', allStyles, allContent);
+  const svg = svgWrapper(ctx, 'BREAKOUT', allStyles, allContent);
   return svg.replace('<defs>', `<defs>${defs}`);
 }

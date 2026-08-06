@@ -1,7 +1,9 @@
 export interface ContributionGrid {
-  grid: number[][]; // [week][day], values 0-4
+  grid: number[][]; // [week][day], levels 0-4
+  counts: number[][]; // [week][day], actual contribution counts
   weeks: number;
   days: number;
+  total: number; // total contributions across the grid
 }
 
 const levelMap: Record<string, number> = {
@@ -12,7 +14,9 @@ const levelMap: Record<string, number> = {
   FOURTH_QUARTILE: 4,
 };
 
-export async function fetchContributions(username: string, token: string): Promise<ContributionGrid> {
+type Rng = () => number;
+
+export async function fetchContributions(username: string, token: string, fallbackRng?: Rng): Promise<ContributionGrid> {
   try {
     const query = `{
       user(login: "${username}") {
@@ -43,20 +47,31 @@ export async function fetchContributions(username: string, token: string): Promi
     const grid: number[][] = rawWeeks.map((w: any) =>
       w.contributionDays.map((d: any) => levelMap[d.contributionLevel] || 0)
     );
+    const counts: number[][] = rawWeeks.map((w: any) =>
+      w.contributionDays.map((d: any) => d.contributionCount || 0)
+    );
+    const total = counts.reduce((sum, week) => sum + week.reduce((s, c) => s + c, 0), 0);
 
-    return { grid, weeks: grid.length, days: 7 };
+    return { grid, counts, weeks: grid.length, days: 7, total };
   } catch {
-    return generateFallback();
+    return generateFallback(fallbackRng || Math.random);
   }
 }
 
-function generateFallback(): ContributionGrid {
+export function generateFallback(rng: Rng): ContributionGrid {
   const grid: number[][] = [];
+  const counts: number[][] = [];
+  let total = 0;
   for (let w = 0; w < 52; w++) {
     grid[w] = [];
+    counts[w] = [];
     for (let d = 0; d < 7; d++) {
-      grid[w][d] = Math.random() < 0.45 ? Math.floor(Math.random() * 4) + 1 : 0;
+      const level = rng() < 0.45 ? Math.floor(rng() * 4) + 1 : 0;
+      grid[w][d] = level;
+      // Rough count for the level — enough for score displays to look real
+      counts[w][d] = level === 0 ? 0 : level * 2 + Math.floor(rng() * 3);
+      total += counts[w][d];
     }
   }
-  return { grid, weeks: 52, days: 7 };
+  return { grid, counts, weeks: 52, days: 7, total };
 }

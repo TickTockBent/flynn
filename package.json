@@ -1,10 +1,12 @@
 {
   "name": "flynn",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Random arcade game SVG for your GitHub profile",
+  "description": "Self-playing arcade games rendered over your GitHub contribution graph as animated SVG",
   "scripts": {
-    "dev": "vercel dev"
+    "dev": "vercel dev",
+    "typecheck": "tsc --noEmit",
+    "preview": "tsc && node dist/scripts/preview.js"
   },
   "devDependencies": {
     "@vercel/node": "^5.6.9",

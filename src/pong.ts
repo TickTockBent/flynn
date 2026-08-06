@@ -1,5 +1,5 @@
 import { ContributionGrid } from './contributions';
-import { WIDTH, HEIGHT, colors, svgWrapper, rand, clamp, renderContribBackground, contribGridLayout } from './shared';
+import { WIDTH, HEIGHT, GameContext, svgWrapper, clamp, renderContribBackground, contribGridLayout } from './shared';
 
 const DURATION = 12;
 const FPS = 30;
@@ -15,13 +15,16 @@ const AREA_BOTTOM = HEIGHT - 5;
 
 const RIGHT_PADDLE_X = WIDTH - PADDLE_MARGIN - PADDLE_W;
 
-export function generatePong(contrib: ContributionGrid): string {
+export function generatePong(contrib: ContributionGrid, ctx: GameContext): string {
+  const { theme, rng } = ctx;
+  const rand = (min: number, max: number) => min + rng() * (max - min);
+
   // ── Ball state ─────────────────────────────────────────────────────────────
 
   const baseSpeed = 9.0;
   let bx = WIDTH / 2, by = (AREA_TOP + AREA_BOTTOM) / 2;
-  let vx = rand(6.5, 8.0) * (Math.random() > 0.5 ? 1 : -1);
-  let vy = rand(3.5, 5.5) * (Math.random() > 0.5 ? 1 : -1);
+  let vx = rand(6.5, 8.0) * (rng() > 0.5 ? 1 : -1);
+  let vy = rand(3.5, 5.5) * (rng() > 0.5 ? 1 : -1);
 
   // ── Paddle AI state ────────────────────────────────────────────────────────
 
@@ -175,7 +178,7 @@ export function generatePong(contrib: ContributionGrid): string {
       leftScore++;
       scoreFrames.push({ frame: f, side: 'left' });
       bx = WIDTH / 2; by = (AREA_TOP + AREA_BOTTOM) / 2;
-      vx = rand(-8, -6.5); vy = rand(3.5, 5.5) * (Math.random() > 0.5 ? 1 : -1);
+      vx = rand(-8, -6.5); vy = rand(3.5, 5.5) * (rng() > 0.5 ? 1 : -1);
       // Re-roll AI errors for new rally
       leftAI.predictionError = rand(-50, 50);
       rightAI.predictionError = rand(-40, 40);
@@ -188,7 +191,7 @@ export function generatePong(contrib: ContributionGrid): string {
       rightScore++;
       scoreFrames.push({ frame: f, side: 'right' });
       bx = WIDTH / 2; by = (AREA_TOP + AREA_BOTTOM) / 2;
-      vx = rand(6.5, 8); vy = rand(3.5, 5.5) * (Math.random() > 0.5 ? 1 : -1);
+      vx = rand(6.5, 8); vy = rand(3.5, 5.5) * (rng() > 0.5 ? 1 : -1);
       leftAI.predictionError = rand(-50, 50);
       rightAI.predictionError = rand(-40, 40);
       leftAI.reactionCountdown = leftAI.reactionDelay;
@@ -207,19 +210,19 @@ export function generatePong(contrib: ContributionGrid): string {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   const layout = contribGridLayout(contrib);
-  const contribBg = renderContribBackground(contrib, layout.cellSize, layout.gap, layout.offsetX, layout.offsetY, 0.2);
+  const contribBg = renderContribBackground(theme, contrib, layout.cellSize, layout.gap, layout.offsetX, layout.offsetY, 0.2);
 
   // Center dashed line
   let centerLine = '';
   for (let y = AREA_TOP; y < AREA_BOTTOM; y += 12) {
-    centerLine += `<rect x="${WIDTH / 2 - 1}" y="${y}" width="2" height="6" fill="${colors.dimmed}" opacity="0.3"/>`;
+    centerLine += `<rect x="${WIDTH / 2 - 1}" y="${y}" width="2" height="6" fill="${theme.dimmed}" opacity="0.3"/>`;
   }
 
   // SVG defs for ball glow
   const defs = `
   <radialGradient id="pongGlow">
-    <stop offset="0%" stop-color="${colors.yellow}" stop-opacity="0.6"/>
-    <stop offset="100%" stop-color="${colors.yellow}" stop-opacity="0"/>
+    <stop offset="0%" stop-color="${theme.yellow}" stop-opacity="0.6"/>
+    <stop offset="100%" stop-color="${theme.yellow}" stop-opacity="0"/>
   </radialGradient>`;
 
   // Styles
@@ -257,21 +260,21 @@ export function generatePong(contrib: ContributionGrid): string {
     allStyles += `@keyframes rf{${rightFlashStops.join('')}}`;
 
     // Flash rectangles covering each half of the screen
-    scoreFlashElements += `<rect class="lf" x="0" y="${AREA_TOP}" width="${WIDTH / 2}" height="${AREA_BOTTOM - AREA_TOP}" fill="${colors.blue}" opacity="0"/>`;
-    scoreFlashElements += `<rect class="rf" x="${WIDTH / 2}" y="${AREA_TOP}" width="${WIDTH / 2}" height="${AREA_BOTTOM - AREA_TOP}" fill="${colors.red}" opacity="0"/>`;
+    scoreFlashElements += `<rect class="lf" x="0" y="${AREA_TOP}" width="${WIDTH / 2}" height="${AREA_BOTTOM - AREA_TOP}" fill="${theme.blue}" opacity="0"/>`;
+    scoreFlashElements += `<rect class="rf" x="${WIDTH / 2}" y="${AREA_TOP}" width="${WIDTH / 2}" height="${AREA_BOTTOM - AREA_TOP}" fill="${theme.red}" opacity="0"/>`;
   }
 
   const content = `
 ${contribBg}
 ${centerLine}
 ${scoreFlashElements}
-<text x="${WIDTH / 2 - 30}" y="16" fill="${colors.blue}" font-family="'Courier New',monospace" font-size="14" opacity="0.7">${leftScore}</text>
-<text x="${WIDTH / 2 + 22}" y="16" fill="${colors.red}" font-family="'Courier New',monospace" font-size="14" opacity="0.7">${rightScore}</text>
-<rect class="lp" x="${PADDLE_MARGIN}" y="0" width="${PADDLE_W}" height="${PADDLE_H}" rx="2" fill="${colors.blue}"/>
-<rect class="rp" x="${RIGHT_PADDLE_X}" y="0" width="${PADDLE_W}" height="${PADDLE_H}" rx="2" fill="${colors.red}"/>
+<text x="${WIDTH / 2 - 30}" y="16" fill="${theme.blue}" font-family="'Courier New',monospace" font-size="14" opacity="0.7">${leftScore}</text>
+<text x="${WIDTH / 2 + 22}" y="16" fill="${theme.red}" font-family="'Courier New',monospace" font-size="14" opacity="0.7">${rightScore}</text>
+<rect class="lp" x="${PADDLE_MARGIN}" y="0" width="${PADDLE_W}" height="${PADDLE_H}" rx="2" fill="${theme.blue}"/>
+<rect class="rp" x="${RIGHT_PADDLE_X}" y="0" width="${PADDLE_W}" height="${PADDLE_H}" rx="2" fill="${theme.red}"/>
 <circle class="ball-glow" cx="0" cy="0" r="12" fill="url(#pongGlow)" opacity="0.5"/>
-<circle class="ball" cx="0" cy="0" r="${BALL_R}" fill="${colors.yellow}"/>`;
+<circle class="ball" cx="0" cy="0" r="${BALL_R}" fill="${theme.yellow}"/>`;
 
-  const svg = svgWrapper('PONG', allStyles, content);
+  const svg = svgWrapper(ctx, 'PONG', allStyles, content);
   return svg.replace('<defs>', `<defs>${defs}`);
 }
